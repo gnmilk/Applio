@@ -127,7 +127,7 @@ def format_title(title):
     return formatted_title
 
 
-def load_embedding(embedder_model, custom_embedder=None):
+def load_embedding(embedder_model, custom_embedder=None, *, allow_fallback=True):
     embedder_root = os.path.join(now_dir, "rvc", "models", "embedders")
     embedding_list = {
         "contentvec": os.path.join(embedder_root, "contentvec"),
@@ -157,8 +157,14 @@ def load_embedding(embedder_model, custom_embedder=None):
     }
 
     if embedder_model == "custom":
-        if os.path.exists(custom_embedder):
+        if custom_embedder and os.path.isdir(custom_embedder):
             model_path = custom_embedder
+        elif not allow_fallback:
+            raise FileNotFoundError(
+                f"Custom embedder directory is unavailable: {custom_embedder!r}. "
+                "Select the original Chinese HuBERT model directory; "
+                "Realtime will not substitute ContentVec."
+            )
         else:
             print(f"Custom embedder not found: {custom_embedder}, using contentvec")
             model_path = embedding_list["contentvec"]

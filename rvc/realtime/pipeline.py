@@ -527,7 +527,9 @@ def create_pipeline(
     )
     big_tsr, _ = index.read_index_tensor()
 
-    hubert_model = load_embedding(embedder_model, embedder_model_custom)
+    hubert_model = load_embedding(
+        embedder_model, embedder_model_custom, allow_fallback=False
+    )
     hubert_model = hubert_model.to(vc.config.device).to(vc.dtype)
     hubert_model.eval()
 

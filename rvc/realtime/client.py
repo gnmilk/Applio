@@ -200,7 +200,9 @@ async def change_config(ws: WebSocket):
 
         from rvc.lib.utils import load_embedding
 
-        hubert_model = load_embedding(embedder_model, embedder_model_custom)
+        hubert_model = load_embedding(
+            embedder_model, embedder_model_custom, allow_fallback=False
+        )
         hubert_model = hubert_model.to(vc_instance.device).float()
         hubert_model.eval()
 
