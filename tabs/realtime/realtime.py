@@ -7,12 +7,19 @@ import json
 import regex as re
 import shutil
 import torch
+import threading
 
 now_dir = os.getcwd()
 sys.path.append(now_dir)
 
 from rvc.realtime.callbacks import AudioCallbacks
-from rvc.realtime.audio import list_audio_device, resolve_sample_rate
+from rvc.realtime.audio import (
+    list_audio_device,
+    resolve_sample_rate,
+    normalize_audio_device_name,
+    resolve_audio_device,
+    reinitialize_audio_backend as _reinitialize_audio_backend,
+)
 from rvc.realtime.core import AUDIO_SAMPLE_RATE
 
 from assets.i18n.i18n import I18nAuto
@@ -311,6 +318,9 @@ interactive_false = gr.update(interactive=False, visible=False)
 interactive_visible = gr.update(interactive=False, visible=True)
 running, callbacks, audio_manager = False, None, None
 callbacks_kwargs = {}
+_realtime_lock = threading.RLock()
+_start_generation = 0
+_starting = False
 
 CONFIG_PATH = os.path.join(now_dir, "assets", "config.json")
 
@@ -411,7 +421,12 @@ def get_safe_dropdown_value(saved_value, choices, fallback_value=None):
     """Safely get a dropdown value, ensuring it exists in choices"""
     if saved_value and saved_value in choices:
         return saved_value
-    elif fallback_value and fallback_value in choices:
+    if saved_value:
+        normalized = normalize_audio_device_name(saved_value).casefold()
+        for choice in choices:
+            if normalize_audio_device_name(choice).casefold() == normalized:
+                return choice
+    if fallback_value and fallback_value in choices:
         return fallback_value
     elif choices:
         return choices[0]
@@ -523,8 +538,10 @@ def start_realtime(
     record_audio_path: str = None,
     export_format: str = "WAV",
 ):
-    global running, callbacks, audio_manager, callbacks_kwargs
-    running = True
+    global running, callbacks, audio_manager, callbacks_kwargs, _starting, _start_generation
+    if running:
+        yield "Realtime is already running. Stop it before starting again.", interactive_false, interactive_visible
+        return
 
     if not input_audio_device or not output_audio_device:
         yield (
@@ -548,6 +565,16 @@ def start_realtime(
         )
         return
 
+    with _realtime_lock:
+        unavailable = running or _starting or callbacks is not None or audio_manager is not None
+        if not unavailable:
+            _starting = True
+            _start_generation += 1
+            request_generation = _start_generation
+    if unavailable:
+        yield "Realtime is starting or still has resources. Stop it before starting again.", interactive_false, interactive_true
+        return
+
     print(f"Starting Realtime...")
     yield i18n("Starting Realtime..."), interactive_false, interactive_visible
 
@@ -558,31 +585,40 @@ def start_realtime(
     monitor_audio_gain /= 100.0
 
     try:
-        input_devices, output_devices = get_audio_devices_formatted()
-        input_device_id = input_devices[input_audio_device]
-        output_device_id = output_devices[output_audio_device]
-        output_monitor_id = (
-            output_devices[monitor_output_device] if use_monitor_device else None
-        )
-    except (ValueError, IndexError):
-        print(f"Error: incorrectly formatted audio device.")
+        with _realtime_lock:
+            if request_generation != _start_generation:
+                return
+            reinitialize_audio_backend(_start_token=request_generation)
+            input_device_id = resolve_audio_device(input_audio_device, "input").index
+            resolve_audio_device(output_audio_device, "output")
+            if use_monitor_device:
+                resolve_audio_device(monitor_output_device, "output")
+            # Keep numeric sample-rate lookup in the same protected inventory
+            # generation as device resolution. Public refresh cannot interrupt it.
+            _rt_cfg = load_realtime_settings()
+            asio_enabled = _rt_cfg["asio_enabled"]
+            audio_sample_rate = resolve_sample_rate(
+                input_device_id, asio_enabled, _rt_cfg["audio_sample_rate"]
+            )
+            if embedder_model == "custom":
+                if not embedder_model_custom or not os.path.isdir(embedder_model_custom):
+                    raise FileNotFoundError(
+                        f"Custom embedder directory is unavailable: {embedder_model_custom!r}. "
+                        "Select the Chinese HuBERT directory; Realtime will not substitute ContentVec."
+                    )
+    except Exception as error:
+        _release_realtime_resources(expected_generation=request_generation)
+        print(f"[Audio] Realtime preparation failed: {error}")
         yield (
-            i18n("Incorrectly formatted audio device. Stopping."),
+            str(error),
             interactive_true,
             interactive_false,
         )
         return
 
-    # Load ASIO and sample rate settings from config.
-    _rt_cfg = load_realtime_settings()
-    asio_enabled = _rt_cfg["asio_enabled"]
-    audio_sample_rate = _rt_cfg["audio_sample_rate"]
-    audio_sample_rate = resolve_sample_rate(
-        input_device_id, asio_enabled, audio_sample_rate
-    )
     block_frame = int(chunk_size * audio_sample_rate / 1000)
 
-    callbacks_kwargs = {
+    start_kwargs = {
         "pass_through": PASS_THROUGH,
         "block_frame": block_frame,
         "cross_fade_overlap_size": cross_fade_overlap_size,
@@ -655,26 +691,34 @@ def start_realtime(
         },
     }
 
-    callbacks = AudioCallbacks(**callbacks_kwargs)
-
-    audio_manager = callbacks.audio
     try:
-        audio_manager.start(
-            input_device_id=input_device_id,
-            output_device_id=output_device_id,
-            output_monitor_id=output_monitor_id,
-            exclusive_mode=exclusive_mode,
-            asio_input_channel=input_asio_channels if asio_enabled else -1,
-            asio_output_channel=output_asio_channels if asio_enabled else -1,
-            asio_output_monitor_channel=monitor_asio_channels if asio_enabled else -1,
-            block_frame=block_frame,
-            audio_sample_rate=audio_sample_rate,
-            asio_output_stereo=asio_output_stereo,
-        )
+        with _realtime_lock:
+            if request_generation != _start_generation:
+                return
+            callbacks_kwargs = start_kwargs
+            callbacks = AudioCallbacks(**start_kwargs)
+            audio_manager = callbacks.audio
+            audio_manager.start(
+                input_device_id=input_audio_device,
+                output_device_id=output_audio_device,
+                output_monitor_id=monitor_output_device if use_monitor_device else None,
+                exclusive_mode=exclusive_mode,
+                asio_input_channel=input_asio_channels if asio_enabled else -1,
+                asio_output_channel=output_asio_channels if asio_enabled else -1,
+                asio_output_monitor_channel=monitor_asio_channels if asio_enabled else -1,
+                block_frame=block_frame,
+                audio_sample_rate=audio_sample_rate,
+                asio_output_stereo=asio_output_stereo,
+            )
+            running = True
+            _starting = False
     except Exception as error:
-        running = False
+        cleanup_errors = _release_realtime_resources(expected_generation=request_generation)
         print(f"Realtime error: {error}")
-        yield i18n("Error: {}").format(error), interactive_true, interactive_false
+        detail = str(error)
+        if cleanup_errors:
+            detail += "\n" + "; ".join(cleanup_errors)
+        yield i18n("Error: {}").format(detail), interactive_true, interactive_false
         return
 
     # print(f"Loading model...")
@@ -703,14 +747,31 @@ def start_realtime(
     print(f"Realtime is starting!")
     yield i18n("Realtime is starting!"), interactive_false, interactive_visible
 
-    warmup_total = 0
-    while warmup_total == 0:
-        warmup_total = callbacks.vc.vc_model.warmup_blocks
+    with _realtime_lock:
+        if request_generation != _start_generation:
+            return
+        warmup_total = max(callbacks.vc.vc_model.warmup_blocks, 1)
 
     while running and callbacks is not None and audio_manager is not None:
         time.sleep(0.1)
-        if hasattr(audio_manager, "latency") and hasattr(audio_manager, "volume"):
-            warmup_remaining = callbacks.vc.vc_model.warmup_blocks
+        with _realtime_lock:
+            if request_generation != _start_generation or callbacks is None or audio_manager is None:
+                break
+            worker_process = callbacks.vc._process
+            worker_dead = worker_process is None or not worker_process.is_alive()
+            has_metrics = hasattr(audio_manager, "latency") and hasattr(audio_manager, "volume")
+            if worker_dead:
+                cleanup_errors = _release_realtime_resources(expected_generation=request_generation)
+                if cleanup_errors:
+                    print("[Audio] " + "; ".join(cleanup_errors))
+            elif has_metrics:
+                warmup_remaining = callbacks.vc.vc_model.warmup_blocks
+                latency, volume = audio_manager.latency, audio_manager.volume
+        if worker_dead:
+            yield "Realtime model worker stopped. Check the console for the model/embedder error.", interactive_true, interactive_false
+            return
+        if has_metrics:
+            warmup_total = max(warmup_total, warmup_remaining)
 
             if warmup_remaining > 0:
                 bar = progress_str(warmup_remaining, warmup_total)
@@ -722,7 +783,7 @@ def start_realtime(
             else:
                 yield (
                     i18n("Latency: {:.2f} ms | Volume: {:.2f} dB").format(
-                        audio_manager.latency, audio_manager.volume
+                        latency, volume
                     ),
                     interactive_false,
                     interactive_true,
@@ -817,17 +878,37 @@ def change_config(value, key, if_kwargs=False):
         change_callbacks_config()
 
 
+def _release_realtime_resources(expected_generation=None):
+    """Release streams before the worker; retain references on cleanup failure."""
+    global running, callbacks, audio_manager, _starting, _start_generation
+    with _realtime_lock:
+        if expected_generation is not None and expected_generation != _start_generation:
+            return []
+        _start_generation += 1
+        _starting = running = False
+        errors = []
+        if audio_manager is not None:
+            try:
+                audio_manager.stop()
+            except Exception as error:
+                errors.append(f"Audio cleanup: {error}")
+        if callbacks is not None:
+            try:
+                callbacks.vc.stop()
+            except Exception as error:
+                errors.append(f"Worker cleanup: {error}")
+        if not errors:
+            audio_manager = callbacks = None
+        return errors
+
+
 def stop_realtime():
-    global running, callbacks, audio_manager
-    if running and audio_manager is not None and callbacks is not None:
-        audio_manager.stop()
-        callbacks.vc.stop()
-        running = False
-        if hasattr(audio_manager, "latency"):
-            del audio_manager.latency
-        del audio_manager, callbacks
-        audio_manager = callbacks = None
-        time.sleep(0.1)
+    if _starting or audio_manager is not None or callbacks is not None:
+        errors = _release_realtime_resources()
+        if errors:
+            message = "; ".join(errors)
+            print(f"[Audio] {message}")
+            return message, interactive_false, interactive_true
 
         print(f"Realtime stopped.")
         return (
@@ -857,17 +938,25 @@ def get_audio_devices_formatted():
         )
 
         input_device_list = {
-            f"{input_sorted.index(d)+1}: {d.name} ({d.host_api})": d.index
+            d.label: d.index
             for d in input_sorted
         }
         output_device_list = {
-            f"{output_sorted.index(d)+1}: {d.name} ({d.host_api})": d.index
+            d.label: d.index
             for d in output_sorted
         }
 
         return input_device_list, output_device_list
-    except Exception:
+    except Exception as error:
+        print(f"[Audio] Error enumerating devices: {error}")
         return {}, {}
+
+
+def reinitialize_audio_backend(*, _start_token=None):
+    with _realtime_lock:
+        if running or (_starting and _start_token != _start_generation):
+            raise RuntimeError("Stop Realtime before refreshing audio devices.")
+        _reinitialize_audio_backend()
 
 
 def update_dropdowns_from_json(data):
@@ -1772,8 +1861,10 @@ def realtime_tab():
             ), gr.update(choices=new_sids, value=0 if new_sids else None)
 
         def refresh_devices():
-            sd._terminate()
-            sd._initialize()
+            if running or _starting:
+                gr.Info("Stop Realtime before refreshing audio devices.")
+                return gr.update(), gr.update(), gr.update()
+            reinitialize_audio_backend()
 
             input_choices, output_choices = get_audio_devices_formatted()
             input_choices, output_choices = list(input_choices.keys()), list(
