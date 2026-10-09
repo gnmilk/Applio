@@ -429,8 +429,9 @@ class Realtime:
             block_size_16k=self.block_frame_16k,
         )
 
-        # Scale output by the current input RMS to suppress residue during silence.
-        audio_out: torch.Tensor = self.resample_out(audio_model * vol_t)
+        # Silence is handled above by VAD/threshold/warmup; the pipeline already
+        # applies the selected volume envelope. Do not attenuate it a second time.
+        audio_out: torch.Tensor = self.resample_out(audio_model)
         return audio_out, vol, False
 
     def __del__(self):
