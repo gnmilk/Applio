@@ -25,6 +25,7 @@ from tabs.inference.inference import (
     update_filter_visibility,
 )
 from tabs.settings.sections.filter import get_filter_trigger, load_config_filter
+from tabs.ui_settings import remember_page
 
 i18n = I18nAuto()
 
@@ -483,4 +484,12 @@ def tts_tab():
             sid,
         ],
         outputs=[vc_output1, vc_output2],
+    )
+
+    remember_page(
+        "tts", locals(),
+        text_fields={"output_tts_path", "output_rvc_path"},
+        path_fields={"model_file", "index_file", "embedder_model_custom"},
+        context_fields=("model_file",),
+        choice_providers={"sid": lambda values: get_speakers_id(values["model_file"])},
     )

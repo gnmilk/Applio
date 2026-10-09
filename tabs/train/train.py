@@ -17,6 +17,7 @@ from core import (
 from rvc.configs.config import get_gpu_info, get_number_of_gpus, max_vram_gpu
 from rvc.lib.utils import format_title
 from tabs.settings.sections.restart import stop_train
+from tabs.ui_settings import remember_page
 
 i18n = I18nAuto()
 now_dir = os.getcwd()
@@ -1089,3 +1090,20 @@ def train_tab():
                 inputs=[],
                 outputs=[pth_dropdown_export, index_dropdown_export],
             )
+
+    remember_page(
+        "training", locals(),
+        # Export selectors are actions, while cleanup/shutdown are one-run actions.
+        exclude={"pth_dropdown_export", "index_dropdown_export", "cleanup", "shutdown_check"},
+        text_fields={"gpu", "dataset_name"},
+        path_fields={"dataset_path", "embedder_model_custom", "g_pretrained_path", "d_pretrained_path"},
+        context_fields=("vocoder",),
+        choice_providers={"sampling_rate": lambda values:
+                          ["32000", "40000", "48000"] if values["vocoder"] == "HiFi-GAN" else ["24000", "32000"]},
+        visibility=lambda values: {
+            "dataset_creator_settings": values["dataset_creator"],
+            "clean_strength": values["noise_reduction"],
+            "custom_pretrained": values["pretrained"],
+            "pretrained_custom_settings": values["pretrained"] and values["custom_pretrained"],
+        },
+    )

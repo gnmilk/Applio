@@ -4,6 +4,7 @@ import gradio as gr
 from matplotlib import pyplot as plt
 
 from rvc.lib.predictors.F0Extractor import F0Extractor
+from tabs.ui_settings import remember_page
 
 from assets.i18n.i18n import I18nAuto
 
@@ -64,3 +65,5 @@ def f0_extractor_tab():
         ],
         outputs=[image_output, txt_output],
     )
+
+    remember_page("f0-extractor", locals())

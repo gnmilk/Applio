@@ -6,6 +6,7 @@ sys.path.append(now_dir)
 
 from assets.i18n.i18n import I18nAuto
 from core import run_model_blender_script
+from tabs.ui_settings import remember_page
 
 i18n = I18nAuto()
 
@@ -118,3 +119,7 @@ def voice_blender_tab():
         inputs=model_fusion_b_dropbox,
         outputs=[model_fusion_b, model_fusion_b_dropbox],
     )
+
+    remember_page("voice-blender", locals(),
+                  text_fields={"model_fusion_name", "model_fusion_a", "model_fusion_b"},
+                  path_fields={"model_fusion_a", "model_fusion_b"})

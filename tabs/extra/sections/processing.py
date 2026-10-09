@@ -6,6 +6,7 @@ now_dir = os.getcwd()
 sys.path.append(now_dir)
 
 from core import run_model_information_script
+from tabs.ui_settings import remember_page
 from assets.i18n.i18n import I18nAuto
 
 i18n = I18nAuto()
@@ -37,3 +38,6 @@ def processing_tab():
         inputs=[model_view_model_path],
         outputs=[model_view_output_info],
     )
+
+    remember_page("model-information", locals(),
+                  text_fields={"model_view_model_path"}, path_fields={"model_view_model_path"})

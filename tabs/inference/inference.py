@@ -14,6 +14,7 @@ from core import run_batch_infer_script, run_infer_script
 from rvc.lib.utils import format_title
 from tabs.settings.sections.filter import get_filter_trigger, load_config_filter
 from tabs.settings.sections.restart import stop_infer
+from tabs.ui_settings import remember_page
 
 i18n = I18nAuto()
 
@@ -2391,4 +2392,16 @@ def inference_tab():
         fn=disable_stop_convert_button,
         inputs=[],
         outputs=[convert_button_batch, stop_button],
+    )
+
+    remember_page(
+        "inference", locals(),
+        exclude={"audio", "preset_dropdown", "formant_preset", "formant_preset_batch"},
+        text_fields={"input_folder_batch", "output_folder_batch"},
+        path_fields={"model_file", "index_file", "embedder_model_custom", "embedder_model_custom_batch"},
+        context_fields=("model_file",),
+        choice_providers={
+            "sid": lambda values: get_speakers_id(values["model_file"]),
+            "sid_batch": lambda values: get_speakers_id(values["model_file"]),
+        },
     )
