@@ -23,6 +23,7 @@ from rvc.realtime.audio import (
 from rvc.realtime.core import AUDIO_SAMPLE_RATE
 
 from assets.i18n.i18n import I18nAuto
+from tabs.ui_settings import remember_page
 
 i18n = I18nAuto()
 
@@ -1805,6 +1806,9 @@ def realtime_tab():
         json_audio_hidden = gr.JSON(visible=False)
         json_button_hidden = gr.JSON(visible=False)
         json_value_hidden = gr.JSON(visible=False)
+        if client_mode:
+            # Browser streams do not use the server's running/_starting globals.
+            client_active = gr.State(False)
 
         def enforce_terms(terms_accepted, *args):
             if not terms_accepted:
@@ -1902,9 +1906,10 @@ def realtime_tab():
             )
 
             json_button_hidden.change(
-                fn=update_button_from_json,
+                fn=lambda data: [*update_button_from_json(data),
+                                 bool(data and (data.get("stop_button", False) or not data.get("start_button", True)))],
                 inputs=[json_button_hidden],
-                outputs=[start_button, stop_button],
+                outputs=[start_button, stop_button, client_active],
             )
 
             json_value_hidden.change(
@@ -2066,9 +2071,9 @@ def realtime_tab():
 
         if client_mode:
             start_button.click(
-                fn=lambda: [interactive_false, interactive_visible],
+                fn=lambda: [interactive_false, interactive_visible, True],
                 inputs=[],
-                outputs=[start_button, stop_button],
+                outputs=[start_button, stop_button, client_active],
             )
 
             start_button.click(
@@ -3240,4 +3245,16 @@ def realtime_tab():
             ),
             inputs=[delay_mix],
             outputs=[],
+        )
+
+        remember_page(
+            "realtime-client" if client_mode else "realtime", locals(),
+            # These selections are already stored by the author's implementation.
+            exclude={"input_audio_device", "output_audio_device", "monitor_output_device", "model_file", "index_file"},
+            text_fields={"record_audio_path"},
+            path_fields={"embedder_model_custom"},
+            context_fields=("model_file",),
+            choice_providers={"sid": lambda values: get_speakers_id(values["model_file"])},
+            reset_guard=(lambda active: not active) if client_mode else (lambda: not (running or _starting)),
+            guard_fields=("client_active",) if client_mode else (),
         )
