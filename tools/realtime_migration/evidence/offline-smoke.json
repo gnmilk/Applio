@@ -1,0 +1,26 @@
+{
+  "status": "NOT TESTED",
+  "scope": "Final offline run using the original named custom directory was interrupted and was not rerun after the WDF_VIOLATION reboot",
+  "corrupt_output_preserved_as": "offline-smoke.interrupted",
+  "earlier_observed_run": {
+    "status": "PASS",
+    "source": "Completed exec_command tool output before the blue screen, not reconstructed from the corrupt result file",
+    "kind": "Offline synthetic inference, not microphone realtime or a speech-quality assessment",
+    "model": "logs/TaiwanFemale3_CNHubert_v3/TaiwanFemale3_CNHubert_v3_90e_28890s.pth",
+    "index": "logs/TaiwanFemale3_CNHubert_v3/TaiwanFemale3_CNHubert_v3.index",
+    "embedder": "rvc/models/embedders/embedders_custom/TencentGameMate_chinese-hubert-base",
+    "trained_embedder_directory": "rvc/models/embedders/embedders_custom/chinese_hubert_base_custom",
+    "both_embedder_weight_sha256": "2fefccd26c2794a583b80f6f7210c721873cb7ebae2c1cde3baf9b27855e24d8",
+    "model_version": "v2",
+    "model_sample_rate": 40000,
+    "vocoder": "HiFi-GAN",
+    "f0_method": "rmvpe",
+    "device": "cuda:0",
+    "warmup_blocks": 13,
+    "synthetic_peak": 0.17458392679691315,
+    "finite_output": true,
+    "vad_warmup_and_post_speech_silence_zero": true,
+    "preset": {"pitch": 9, "index_rate": 0.75, "protect": 0.5, "volume_envelope": 0.63, "chunk_ms": 250, "crossfade_s": 0.05, "extra_s": 2.5, "phase_vocoder": true}
+  },
+  "hardware_audio": {"status": "NOT TESTED", "reason": "No completed audio-smoke artifact exists; combined verification was aborted by a Windows blue screen"}
+}

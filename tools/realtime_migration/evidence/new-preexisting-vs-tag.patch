@@ -1,0 +1,932 @@
+diff --git a/Dockerfile b/Dockerfile
+deleted file mode 100644
+index aa839b45..00000000
+--- a/Dockerfile
++++ /dev/null
+@@ -1,35 +0,0 @@
+-# syntax=docker/dockerfile:1
+-FROM python:3.12-trixie
+-
+-# Expose the required port
+-EXPOSE 6969
+-
+-# Set up working directory
+-WORKDIR /app
+-
+-# Install system dependencies, clean up cache to keep image size small
+-RUN apt update && \
+-    apt install -y -qq ffmpeg && \
+-    apt install -y -qq libportaudio2 && \
+-    apt clean && rm -rf /var/lib/apt/lists/*
+-
+-# Copy application files into the container
+-COPY . .
+-
+-# Create a virtual environment in the app directory and install dependencies
+-RUN python3 -m venv /app/.venv && \
+-    . /app/.venv/bin/activate && \
+-    pip install --no-cache-dir --upgrade pip && \
+-    pip install --no-cache-dir python-ffmpeg && \
+-    pip install --no-cache-dir torch==2.7.1 torchvision torchaudio==2.7.1 --index-url https://download.pytorch.org/whl/cu128 && \
+-    if [ -f "requirements.txt" ]; then pip install --no-cache-dir -r requirements.txt; fi
+-
+-# Define volumes for persistent storage
+-VOLUME ["/app/logs/"]
+-
+-# Set environment variables if necessary
+-ENV PATH="/app/.venv/bin:$PATH"
+-
+-# Run the app
+-ENTRYPOINT ["python3"]
+-CMD ["app.py", "--server-name", "0.0.0.0", "--port", "6969"]
+diff --git a/Makefile b/Makefile
+deleted file mode 100644
+index 8f57775b..00000000
+--- a/Makefile
++++ /dev/null
+@@ -1,22 +0,0 @@
+-.PHONY:
+-.ONESHELL:
+-
+-# Show help message
+-help:
+-	@grep -hE '^[A-Za-z0-9_ \-]*?:.*##.*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
+-
+-# Install dependencies
+-run-install:
+-	apt-get -y install build-essential python3-dev ffmpeg
+-	pip install --upgrade setuptools wheel
+-	pip install pip==24.1
+-	pip install -r requirements.txt
+-	apt-get update
+-
+-# Run Applio
+-run-applio:
+-	python app.py --share
+-
+-# Run Tensorboard
+-run-tensorboard:
+-	python core.py tensorboard
+diff --git a/assets/Applio.ipynb b/assets/Applio.ipynb
+index aed9099f..f9c1340a 100644
+--- a/assets/Applio.ipynb
++++ b/assets/Applio.ipynb
+@@ -91,11 +91,13 @@
+         "\n",
+         "print(\"Installing requirements...\")\n",
+         "!curl -LsSf https://astral.sh/uv/install.sh | sh\n",
+-        "!uv pip install -q -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu128 --index-strategy unsafe-best-match\n",
+-        "!uv pip install -q ngrok jupyter-ui-poll\n",
++        "!uv venv .venv --python 3.12 --seed\n",
++        "!uv pip install -q -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu128 --index-strategy unsafe-best-match --python /content/{repo_name}/.venv/bin/python\n",
++        "!uv pip install -q ngrok jupyter-ui-poll --system\n",
++        "!uv pip install -q matplotlib-inline websockets --python /content/{repo_name}/.venv/bin/python\n",
+         "!npm install -g -q localtunnel &> /dev/null\n",
+         "\n",
+-        "!python core.py prerequisites --models --pretraineds-hifigan\n",
++        "!/content/{repo_name}/.venv/bin/python core.py prerequisites --models --pretraineds-hifigan\n",
+         "print(\"✅ Finished installing requirements!\")\n"
+       ]
+     },
+@@ -268,7 +270,7 @@
+         "\n",
+         "match method:\n",
+         "  case 'gradio':\n",
+-        "    !python app.py --listen --share --client\n",
++        "    !/content/{repo_name}/.venv/bin/python app.py --listen --share --client\n",
+         "  case 'localtunnel':\n",
+         "    !echo Password IP: $(curl --silent https://ipv4.icanhazip.com)\n",
+         "    !echo\n",
+@@ -278,7 +280,7 @@
+         "    ngrok.kill()\n",
+         "    listener = await ngrok.forward(6969, authtoken=ngrok_token)\n",
+         "    print(f\"Ngrok URL: {listener.url()}\")\n",
+-        "    !python app.py --listen --client"
++        "    !/content/{repo_name}/.venv/bin/python app.py --listen --client"
+       ]
+     }
+   ],
+diff --git a/assets/Applio_Kaggle.ipynb b/assets/Applio_Kaggle.ipynb
+index be27bc74..c1bb0eb5 100644
+--- a/assets/Applio_Kaggle.ipynb
++++ b/assets/Applio_Kaggle.ipynb
+@@ -57,9 +57,11 @@
+     "clear_output()\n",
+     "!apt update -y\n",
+     "!apt install -y portaudio19-dev psmisc\n",
+-    "!uv pip install -q -r /kaggle/working/program_ml/requirements.txt --extra-index-url https://download.pytorch.org/whl/cu128 --index-strategy unsafe-best-match --system\n",
++    "!uv venv /kaggle/.venv --python 3.12 --seed\n",
++    "!uv pip install -q -r /kaggle/working/program_ml/requirements.txt --extra-index-url https://download.pytorch.org/whl/cu128 --index-strategy unsafe-best-match --python /kaggle/.venv/bin/python\n",
++    "!uv pip install -q matplotlib-inline websockets --python /kaggle/.venv/bin/python\n",
+     "%cd /kaggle/working/program_ml\n",
+-    "!python core.py prerequisites --models --exe --pretraineds-hifigan > /dev/null 2>&1\n",
++    "!/kaggle/.venv/bin/python core.py prerequisites --models --exe --pretraineds-hifigan > /dev/null 2>&1\n",
+     "!sudo curl -fsSL https://raw.githubusercontent.com/filebrowser/get/master/get.sh | sudo bash\n",
+     "!filebrowser config init\n",
+     "!filebrowser config set --auth.method=noauth\n",
+@@ -277,7 +279,7 @@
+     "  print(f\"FileBrowser Public URL: {f_tunnel}\")\n",
+     "\n",
+     "print(\"Save your links for later, this will take a while...\")\n",
+-    "!python app.py --client --host 0.0.0.0 --port 6969 $share_option\n",
++    "!/kaggle/.venv/bin/python app.py --client --host 0.0.0.0 --port 6969 $share_option\n",
+     "\n",
+     "# kills previously running processes\n",
+     "!fuser -k 6969/tcp\n",
+diff --git a/assets/Applio_NoUI.ipynb b/assets/Applio_NoUI.ipynb
+index 9cb10246..f858c359 100644
+--- a/assets/Applio_NoUI.ipynb
++++ b/assets/Applio_NoUI.ipynb
+@@ -92,9 +92,11 @@
+     "\n",
+     "print(\"Installing requirements...\")\n",
+     "!curl -LsSf https://astral.sh/uv/install.sh | sh\n",
+-    "!uv pip install -q -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu128 --index-strategy unsafe-best-match\n",
+-    "!uv pip install -q jupyter-ui-poll\n",
+-    "!python core.py prerequisites --models --pretraineds-hifigan --exe\n",
++    "!uv venv .venv --python 3.12 --seed\n",
++    "!uv pip install -q -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu128 --index-strategy unsafe-best-match --python /content/Applio/.venv/bin/python\n",
++    "!uv pip install -q jupyter-ui-poll --system\n",
++    "!uv pip install -q matplotlib-inline websockets --python /content/Applio/.venv/bin/python\n",
++    "!/content/Applio/.venv/bin/python core.py prerequisites --models --pretraineds-hifigan --exe\n",
+     "!cp assets/config_template.json assets/config.json\n",
+     "print(\"Finished installing requirements!\")\n"
+    ]
+@@ -256,7 +258,7 @@
+     "model_link = \"https://huggingface.co/Darwin/Darwin/resolve/main/Darwin.zip\"  # @param {type:\"string\"}\n",
+     "\n",
+     "%cd /content/Applio\n",
+-    "!python core.py download --model-link \"{model_link}\"\n"
++    "!/content/Applio/.venv/bin/python core.py download --model-link \"{model_link}\"\n"
+    ]
+   },
+   {
+@@ -305,11 +307,11 @@
+     "embedder_model = \"contentvec\" # @param [\"contentvec\", \"spin-v2\", \"chinese-hubert-base\", \"japanese-hubert-base\", \"korean-hubert-base\", \"custom\"] {allow-input: false}\n",
+     "embedder_model_custom = \"\" # @param {type:\"string\"}\n",
+     "\n",
+-    "import subprocess\n",
++    "import shlex\n",
+     "\n",
+     "# Build inference command dynamically for Click CLI\n",
+     "cmd = [\n",
+-    "    \"python\", \"core.py\", \"infer\",\n",
++    "    \"/content/Applio/.venv/bin/python\", \"core.py\", \"infer\",\n",
+     "    \"--pitch\", str(f0_up_key),\n",
+     "    \"--volume-envelope\", str(rms_mix_rate),\n",
+     "    \"--index-rate\", str(index_rate),\n",
+@@ -368,10 +370,7 @@
+     "                \"--delay-mix\", str(delay_mix)]\n",
+     "\n",
+     "!rm -f \"{output_path}\"\n",
+-    "result = subprocess.run(cmd, capture_output=True, text=True)\n",
+-    "print(result.stdout)\n",
+-    "if result.returncode != 0:\n",
+-    "    print(result.stderr)\n",
++    "!{shlex.join(cmd)}\n",
+     "\n",
+     "if Path(output_path).exists():\n",
+     "  from IPython.display import Audio, display\n",
+@@ -484,9 +483,9 @@
+     "normalization_mode = \"none\" # @param [\"none\",\"pre\",\"post\"]\n",
+     "\n",
+     "%cd /content/Applio\n",
+-    "import subprocess\n",
++    "import shlex\n",
+     "pp_cmd = [\n",
+-    "    \"python\", \"core.py\", \"preprocess\",\n",
++    "    \"/content/Applio/.venv/bin/python\", \"core.py\", \"preprocess\",\n",
+     "    \"--model-name\", model_name,\n",
+     "    \"--dataset-path\", dataset_path,\n",
+     "    \"--sample-rate\", str(sr),\n",
+@@ -501,10 +500,7 @@
+     "    pp_cmd.append(\"--process-effects\")\n",
+     "if noise_reduction:\n",
+     "    pp_cmd.append(\"--noise-reduction\")\n",
+-    "result = subprocess.run(pp_cmd, capture_output=True, text=True)\n",
+-    "print(result.stdout)\n",
+-    "if result.returncode != 0:\n",
+-    "    print(result.stderr)\n"
++    "!{shlex.join(pp_cmd)}\n"
+    ]
+   },
+   {
+@@ -525,7 +521,7 @@
+     "embedder_model_custom = \"\" # @param {type:\"string\"}\n",
+     "\n",
+     "%cd /content/Applio\n",
+-    "!python core.py extract --model-name \"{model_name}\" --f0-method \"{f0_method}\" --sample-rate \"{sr}\" --cpu-cores \"{cpu_cores}\" --gpu \"0\" --embedder-model \"{embedder_model}\" --include-mutes \"{include_mutes}\"\n"
++    "!/content/Applio/.venv/bin/python core.py extract --model-name \"{model_name}\" --f0-method \"{f0_method}\" --sample-rate \"{sr}\" --cpu-cores \"{cpu_cores}\" --gpu \"0\" --embedder-model \"{embedder_model}\" --include-mutes \"{include_mutes}\"\n"
+    ]
+   },
+   {
+@@ -541,7 +537,7 @@
+     "index_algorithm = \"Auto\"  # @param [\"Auto\", \"Faiss\", \"KMeans\"] {allow-input: false}\n",
+     "\n",
+     "%cd /content/Applio\n",
+-    "!python core.py index --model-name \"{model_name}\" --index-algorithm \"{index_algorithm}\"\n"
++    "!/content/Applio/.venv/bin/python core.py index --model-name \"{model_name}\" --index-algorithm \"{index_algorithm}\"\n"
+    ]
+   },
+   {
+@@ -578,10 +574,10 @@
+     "if tensorboard:\n",
+     "  %load_ext tensorboard\n",
+     "  %tensorboard --logdir logs --bind_all\n",
+-    "import subprocess\n",
++    "import shlex\n",
+     "# Build training command dynamically for Click CLI\n",
+     "train_cmd = [\n",
+-    "    \"python\", \"core.py\", \"train\",\n",
++    "    \"/content/Applio/.venv/bin/python\", \"core.py\", \"train\",\n",
+     "    \"--model-name\", model_name,\n",
+     "    \"--save-every-epoch\", str(save_every_epoch),\n",
+     "    \"--total-epoch\", str(total_epoch),\n",
+@@ -607,10 +603,7 @@
+     "    train_cmd.append(\"--cache-data-in-gpu\")\n",
+     "if checkpointing:\n",
+     "    train_cmd.append(\"--checkpointing\")\n",
+-    "result = subprocess.run(train_cmd, capture_output=True, text=True)\n",
+-    "print(result.stdout)\n",
+-    "if result.returncode != 0:\n",
+-    "    print(result.stderr)\n"
++    "!{shlex.join(train_cmd)}\n"
+    ]
+   },
+   {
+diff --git a/docker-compose.yaml b/docker-compose.yaml
+deleted file mode 100644
+index c40724ea..00000000
+--- a/docker-compose.yaml
++++ /dev/null
+@@ -1,16 +0,0 @@
+-version: '1'
+-
+-services:
+-  applio:
+-    build:
+-      context: ./
+-      dockerfile: Dockerfile
+-    ports:
+-      - "6969"
+-    deploy:
+-      resources:
+-        reservations:
+-          devices:
+-            - driver: nvidia
+-              count: 1
+-              capabilities: [gpu]
+\ No newline at end of file
+diff --git a/requirements.txt b/requirements.txt
+index b305accd..832dea8a 100644
+--- a/requirements.txt
++++ b/requirements.txt
+@@ -19,6 +19,8 @@ torchcrepe==0.0.24
+ torchfcpe==0.0.4
+ einops==0.8.2
+ transformers==5.13.1
++swift-f0==0.3.0
++onnxruntime-gpu==1.26.0
+ 
+ matplotlib==3.11.0
+ tensorboard==2.21.0
+diff --git a/run-applio.sh b/run-applio.sh
+deleted file mode 100644
+index 725030e9..00000000
+--- a/run-applio.sh
++++ /dev/null
+@@ -1,10 +0,0 @@
+-#!/bin/sh
+-printf "\033]0;Applio\007"
+-. .venv/bin/activate
+-
+- export PYTORCH_ENABLE_MPS_FALLBACK=1
+- export PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0
+- 
+-clear
+-python app.py --open "$@"
+-
+diff --git a/run-install.bat b/run-install.bat
+deleted file mode 100644
+index 53ec5151..00000000
+--- a/run-install.bat
++++ /dev/null
+@@ -1,112 +0,0 @@
+-@echo off
+-setlocal enabledelayedexpansion
+-title Applio Installer
+-
+-echo Welcome to the Applio Installer!
+-echo.
+-
+-set "INSTALL_DIR=%cd%"
+-set "MINICONDA_DIR=%UserProfile%\Miniconda3"
+-set "ENV_DIR=%INSTALL_DIR%\env"
+-set "MINICONDA_URL=https://repo.anaconda.com/miniconda/Miniconda3-py312_25.11.1-1-Windows-x86_64.exe"
+-set "CONDA_EXE=%MINICONDA_DIR%\Scripts\conda.exe"
+-
+-set "startTime=%TIME%"
+-set "startHour=%TIME:~0,2%"
+-set "startMin=%TIME:~3,2%"
+-set "startSec=%TIME:~6,2%"
+-set /a startHour=1%startHour% - 100
+-set /a startMin=1%startMin% - 100
+-set /a startSec=1%startSec% - 100
+-set /a startTotal = startHour*3600 + startMin*60 + startSec
+-
+-call :cleanup
+-call :install_miniconda
+-call :create_conda_env
+-call :install_dependencies
+-
+-set "endTime=%TIME%"
+-set "endHour=%TIME:~0,2%"
+-set "endMin=%TIME:~3,2%"
+-set "endSec=%TIME:~6,2%"
+-set /a endHour=1%endHour% - 100
+-set /a endMin=1%endMin% - 100
+-set /a endSec=1%endSec% - 100
+-set /a endTotal = endHour*3600 + endMin*60 + endSec
+-set /a elapsed = endTotal - startTotal
+-if %elapsed% lss 0 set /a elapsed += 86400
+-set /a hours = elapsed / 3600
+-set /a minutes = (elapsed %% 3600) / 60
+-set /a seconds = elapsed %% 60
+-
+-echo Installation time: %hours% hours, %minutes% minutes, %seconds% seconds.
+-echo.
+-
+-echo Applio has been installed successfully!
+-echo To start Applio, please run 'run-applio.bat'.
+-echo.
+-pause
+-exit /b 0
+-
+-:cleanup
+-echo Cleaning up unnecessary files...
+-for %%F in (Makefile Dockerfile docker-compose.yaml *.sh) do if exist "%%F" del "%%F"
+-echo Cleanup complete.
+-echo.
+-exit /b 0
+-
+-:install_miniconda
+-if exist "%CONDA_EXE%" (
+-    echo Miniconda already installed. Skipping installation.
+-    exit /b 0
+-)
+-
+-echo Miniconda not found. Starting download and installation...
+-powershell -Command "& {Invoke-WebRequest -Uri '%MINICONDA_URL%' -OutFile 'miniconda.exe'}"
+-if not exist "miniconda.exe" goto :download_error
+-
+-start /wait "" miniconda.exe /InstallationType=JustMe /RegisterPython=0 /S /D=%MINICONDA_DIR%
+-if errorlevel 1 goto :install_error
+-
+-del miniconda.exe
+-echo Miniconda installation complete.
+-echo.
+-exit /b 0
+-
+-:create_conda_env
+-echo Creating Conda environment...
+-call "%MINICONDA_DIR%\_conda.exe" create --no-shortcuts -y -k --prefix "%ENV_DIR%" python=3.12
+-if errorlevel 1 goto :error
+-echo Conda environment created successfully.
+-echo.
+-
+-if exist "%ENV_DIR%\python.exe" (
+-    echo Installing uv package installer...
+-    "%ENV_DIR%\python.exe" -m pip install uv
+-    if errorlevel 1 goto :error
+-    echo uv installation complete.
+-    echo.
+-)
+-exit /b 0
+-
+-:install_dependencies
+-echo Installing dependencies...
+-call "%MINICONDA_DIR%\condabin\conda.bat" activate "%ENV_DIR%" || goto :error
+-uv pip install -r "%INSTALL_DIR%\requirements.txt" --extra-index-url https://download.pytorch.org/whl/cu128 --index-strategy unsafe-best-match || goto :error
+-call "%MINICONDA_DIR%\condabin\conda.bat" deactivate
+-echo Dependencies installation complete.
+-echo.
+-exit /b 0
+-
+-:download_error
+-echo Download failed. Please check your internet connection and try again.
+-goto :error
+-
+-:install_error
+-echo Miniconda installation failed.
+-goto :error
+-
+-:error
+-echo An error occurred during installation. Please check the output above for details.
+-pause
+-exit /b 1
+diff --git a/run-install.sh b/run-install.sh
+deleted file mode 100644
+index af77714c..00000000
+--- a/run-install.sh
++++ /dev/null
+@@ -1,185 +0,0 @@
+-#!/bin/bash
+-set -e # Exit immediately if a command exits with a non-zero status
+-
+-GREEN='\033[0;32m'
+-RED='\033[0;31m'
+-NC='\033[0m' # No Color
+-
+-printf "\033]0;Installer\007"
+-clear
+-
+-# Delete Windows bat files (.bat)
+-find . -type f -iname "*.bat" -delete
+-
+-# Function to log messages with timestamps
+-log_message() {
+-    local msg="$1"
+-    echo -e "${GREEN}$(date '+%Y-%m-%d %H:%M:%S') - $msg${NC}"
+-}
+-
+-log_error() {
+-    echo -e "${RED}[ERROR]$(date '+%Y-%m-%d %H:%M:%S') - $1${NC}"
+-}
+-
+-# Helper function for yes/no user prompt
+-confirm() {
+-    local prompt="${1:-Are you sure?}"
+-    read -p "$prompt [y/N]: " -n 1 -r
+-    echo
+-    [[ $REPLY =~ ^[Yy]$ ]]
+-}
+-
+-# Function to install build tools based on the distribution (reguired for wheel)
+-install_build_tools() {
+-    log_message "Attempting to install build tools..."
+-    if command -v apt > /dev/null; then
+-        log_message "Installing build-essential using apt..."
+-        sudo apt update && sudo apt install -y build-essential
+-    elif command -v pacman > /dev/null; then
+-        log_message "Installing base-devel using pacman..."
+-        sudo pacman -Sy --noconfirm base-devel
+-    elif command -v dnf > /dev/null; then
+-        log_message "Installing Development Tools using dnf..."
+-        sudo dnf install -y @development-tools --allowerasing
+-    else
+-        log_error "Unsupported distribution for build tools installation. Install build tools equivelant for your distribution and try again."
+-    fi
+-}
+-
+-# Function to install FFmpeg based on the distribution
+-install_ffmpeg() {
+-    if command -v brew > /dev/null; then
+-        log_message "Installing FFmpeg using Homebrew on macOS..."
+-        brew install ffmpeg
+-    elif command -v apt > /dev/null; then
+-        log_message "Installing FFmpeg using apt..."
+-        sudo apt update && sudo apt install -y ffmpeg
+-    elif command -v pacman > /dev/null; then
+-        log_message "Installing FFmpeg using pacman..."
+-        sudo pacman -Syu --noconfirm ffmpeg
+-    elif command -v dnf > /dev/null; then
+-        log_message "Installing FFmpeg using dnf..."
+-        sudo dnf install -y ffmpeg --allowerasing || install_ffmpeg_flatpak
+-    else
+-        log_message "Unsupported distribution for FFmpeg installation. Trying Flatpak..."
+-        install_ffmpeg_flatpak
+-    fi
+-}
+-
+-install_deps() {
+-    if command -v dnf > /dev/null; then
+-        log_message "Installing deps needed using dnf..."
+-        sudo dnf install -y portaudio --allowerasing 
+-    fi
+-}
+-
+-# Function to install FFmpeg using Flatpak
+-install_ffmpeg_flatpak() {
+-    if command -v flatpak > /dev/null; then
+-        log_message "Installing FFmpeg using Flatpak..."
+-        flatpak install --user -y flathub org.freedesktop.Platform.ffmpeg
+-    else
+-        log_message "Flatpak is not installed. Installing Flatpak..."
+-        if command -v apt > /dev/null; then
+-            sudo apt install -y flatpak
+-        elif command -v pacman > /dev/null; then
+-            sudo pacman -Syu --noconfirm flatpak
+-        elif command -v dnf > /dev/null; then
+-            sudo dnf install -y flatpak
+-        elif command -v brew > /dev/null; then
+-            brew install flatpak
+-        else
+-            log_message "Unable to install Flatpak automatically. Please install Flatpak and try again."
+-            exit 1
+-        fi
+-        flatpak install --user -y flathub org.freedesktop.Platform.ffmpeg
+-    fi
+-}
+-
+-install_python_ffmpeg() {
+-    log_message "Installing python-ffmpeg..."
+-    uv pip install python-ffmpeg
+-}
+-
+-# Function to create or activate a virtual environment
+-prepare_install() {
+-    if [ -d ".venv" ]; then
+-        log_message "Virtual environment found. This implies Applio has been already installed or this is a broken install."
+-        if confirm "Do you want to execute the install script again?"; then
+-            log_message "Continuing with the installation."
+-            rm -rf .venv
+-            create_venv
+-        else
+-            chmod +x run-applio.sh
+-            ./run-applio.sh && exit 0
+-        fi
+-    else
+-        create_venv
+-    fi
+-}
+-
+-# Function to create the virtual environment and install dependencies
+-create_venv() {
+-    install_build_tools
+-    install_deps
+-
+-    if ! command -v uv --version >/dev/null 2>&1; then
+-        log_message "Installing uv"
+-        curl -LsSf https://astral.sh/uv/install.sh | sh
+-    fi
+-
+-    log_message "Creating virtual environment..."
+-    uv venv .venv --python 3.12
+-    log_message "Activating virtual environment..."
+-    source .venv/bin/activate
+-
+-    install_ffmpeg
+-    log_message "Installing python-ffmpeg..."
+-    uv pip install python-ffmpeg
+-
+-    log_message "Installing dependencies..."
+-    if [ -f  "requirements.txt" ]; then
+-        export UV_HTTP_TIMEOUT=300 # for slow internet
+-        if [ "$(uname)" = "Darwin" ]; then
+-            uv pip install -r requirements.txt
+-        else 
+-            # nvidia-smi &>/dev/null; then
+-            uv pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu128 --index-strategy unsafe-best-match
+-        fi
+-    else
+-        log_message "requirements.txt not found. Please ensure it exists."
+-        exit 1
+-    fi
+-
+-    finish
+-}
+-
+-# Function to finish installation
+-finish() {
+-    # clear
+-    log_message "##########"
+-    log_message "Applio has been successfully installed. Run the file run-applio.sh to start the web interface!"
+-    log_message "##########"
+-    exit 0
+-}
+-
+-# Main script execution
+-if [ "$(uname)" = "Darwin" ]; then
+-    log_message "Detected macOS..."
+-
+-    if ! command -v brew >/dev/null 2>&1; then
+-        log_message "Homebrew not found. Installing Homebrew..."
+-        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+-    fi
+-
+-    export PYTORCH_ENABLE_MPS_FALLBACK=1
+-    export PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0
+-    export PATH="$(brew --prefix)/bin:$PATH"
+-    brew install faiss
+-elif [ "$(uname)" != "Linux" ]; then
+-    log_message "Unsupported operating system. Are you using Windows?"
+-    log_message "If yes, use the batch (.bat) file instead of this one!"
+-    exit 1
+-fi
+-
+-prepare_install
+diff --git a/run-tensorboard.sh b/run-tensorboard.sh
+deleted file mode 100644
+index 26e98b58..00000000
+--- a/run-tensorboard.sh
++++ /dev/null
+@@ -1,6 +0,0 @@
+-#!/bin/sh
+-printf "\033]0;Tensorboard\007"
+-. .venv/bin/activate
+-
+-clear
+-python core.py tensorboard
+\ No newline at end of file
+diff --git a/rvc/infer/pipeline.py b/rvc/infer/pipeline.py
+index e98a101e..250efae8 100644
+--- a/rvc/infer/pipeline.py
++++ b/rvc/infer/pipeline.py
+@@ -12,7 +12,7 @@ from torch import Tensor
+ now_dir = os.getcwd()
+ sys.path.append(now_dir)
+ 
+-from rvc.lib.predictors.f0 import CREPE, FCPE, RMVPE
++from rvc.lib.predictors.f0 import CREPE, FCPE, RMVPE, Swift
+ 
+ import logging
+ 
+@@ -243,6 +243,12 @@ class Pipeline:
+             )
+             f0 = model.get_f0(x, p_len, filter_radius=0.006)
+             del model
++        elif f0_method == "swift":
++            model = Swift(
++                device=self.device, sample_rate=self.sample_rate, hop_size=self.window
++            )
++            f0 = model.get_f0(x, p_len, self.f0_min, self.f0_max)
++            del model
+ 
+         # f0 adjustments
+         if f0_autotune is True:
+diff --git a/rvc/lib/predictors/f0.py b/rvc/lib/predictors/f0.py
+index 6a8fceaf..e93f454d 100644
+--- a/rvc/lib/predictors/f0.py
++++ b/rvc/lib/predictors/f0.py
+@@ -3,10 +3,12 @@ import json
+ import torch
+ 
+ from rvc.lib.predictors.RMVPE import RMVPE0Predictor
++from swift_f0 import FRAME_PERIOD, SwiftF0
+ from torchfcpe import spawn_infer_model_from_pt
+ import torchcrepe
+ import numpy as np
+ import librosa
++import onnxruntime
+ 
+ # Defaults for the "rmvpe_high_register" section of assets/config.json
+ # (edited from the Settings tab; see assets/config_template.json).
+@@ -182,3 +184,75 @@ class FCPE:
+         )
+ 
+         return f0
++
++
++class Swift:
++    def __init__(self, device=None, sample_rate=16000, hop_size=160):
++        self.device = device
++        self.sample_rate = sample_rate
++        self.hop_size = hop_size
++        self.model = SwiftF0()
++        if "cuda" in str(device).lower():
++            available = onnxruntime.get_available_providers()
++            providers = [p for p in ("CUDAExecutionProvider", "CPUExecutionProvider") if p in available]
++            self.model.session.set_providers(providers)
++
++    @staticmethod
++    def _repair_subharmonics(pitch, confidence, frame_period=0.016):
++        pitch = np.asarray(pitch, dtype=np.float64)
++        confidence = np.asarray(confidence, dtype=np.float64)
++        corrected = pitch.copy()
++        repaired = np.zeros(len(pitch), dtype=bool)
++        i = 1
++        while i < len(pitch) - 1:
++            if confidence[i - 1] < 0.5 or not 0.3 <= confidence[i] < 0.95:
++                i += 1
++                continue
++            ratio = pitch[i - 1] / pitch[i]
++            factor = min((2, 3), key=lambda value: abs(np.log2(ratio / value)))
++            if abs(1200 * np.log2(ratio / factor)) > 100:
++                i += 1
++                continue
++            j = i
++            while j < len(pitch) and (j - i) * frame_period < 1.0:
++                if not 0.3 <= confidence[j] < 0.95:
++                    break
++                previous = pitch[i - 1] if j == i else pitch[j - 1] * factor
++                if abs(1200 * np.log2(pitch[j] * factor / previous)) > 100:
++                    break
++                j += 1
++            if j > i and j < len(pitch) and confidence[j] >= 0.5:
++                return_error = abs(1200 * np.log2(pitch[j] / (pitch[j - 1] * factor)))
++                anchor_error = abs(1200 * np.log2(pitch[j] / pitch[i - 1]))
++                if return_error <= 100 and anchor_error <= 150:
++                    corrected[i:j] *= factor
++                    repaired[i:j] = True
++                    i = j + 1
++                    continue
++            i += 1
++        return corrected, repaired
++
++    def get_f0(self, x, p_len=None, f0_min=50.0, f0_max=1100.0, threshold=0.5):
++        if torch.is_tensor(x):
++            x = x.detach().cpu().numpy()
++        if p_len is None:
++            p_len = np.asarray(x).shape[0] // self.hop_size
++        if p_len <= 0:
++            return np.zeros(0, dtype=np.float64)
++        result = self.model.detect(x, 16000, fmin=f0_min, fmax=f0_max)
++        pitch, repaired = self._repair_subharmonics(
++            result.pitch_hz, result.confidence, FRAME_PERIOD
++        )
++        repaired &= (pitch >= f0_min) & (pitch <= f0_max)
++        pitch = np.where(repaired, pitch, result.pitch_hz)
++        confidence = np.where(
++            repaired, np.maximum(result.confidence, threshold), result.confidence
++        )
++        t_src = result.timestamps
++        t_tgt = np.arange(p_len) * self.hop_size / self.sample_rate
++        voiced = confidence >= threshold
++        if not np.any(voiced):
++            return np.zeros(p_len, dtype=np.float64)
++        f0 = np.exp2(np.interp(t_tgt, t_src[voiced], np.log2(pitch[voiced])))
++        f0[np.interp(t_tgt, t_src, confidence) < threshold] = 0.0
++        return f0
+diff --git a/rvc/lib/tools/split_audio.py b/rvc/lib/tools/split_audio.py
+index e7d29420..e2a02a5f 100644
+--- a/rvc/lib/tools/split_audio.py
++++ b/rvc/lib/tools/split_audio.py
+@@ -32,7 +32,7 @@ def merge_audio(audio_segments_org, audio_segments_new, intervals, sr_orig, sr_n
+     Assumes audio segments are already at sr_new.
+ 
+     Parameters:
+-    - audio_segments_org (list of np.ndarray): The non-silent audio segments (at sr_orig).
++    - audio_segments_org (list of np.ndarray): Original segments. Callers still pass them. Timing comes from the intervals.
+     - audio_segments_new (list of np.ndarray): The non-silent audio segments (at sr_new).
+     - intervals (np.ndarray): The intervals used for splitting the original audio.
+     - sr_orig (int): The sample rate of the original audio
+@@ -44,36 +44,19 @@ def merge_audio(audio_segments_org, audio_segments_new, intervals, sr_orig, sr_n
+     sr_ratio = sr_new / sr_orig
+ 
+     for i, (start, end) in enumerate(intervals):
+-
+         start_new = int(start * sr_ratio)
+         end_new = int(end * sr_ratio)
+ 
+-        original_duration = len(audio_segments_org[i]) / sr_orig
+-        new_duration = len(audio_segments_new[i]) / sr_new
+-        duration_diff = new_duration - original_duration
+-
+-        silence_samples = int(abs(duration_diff) * sr_new)
+-        silence_compensation = np.zeros(
+-            silence_samples, dtype=audio_segments_new[0].dtype
+-        )
+-
+-        if i == 0 and start_new > 0:
+-            initial_silence = np.zeros(start_new, dtype=audio_segments_new[0].dtype)
+-            merged_audio = np.concatenate((merged_audio, initial_silence))
+-
+-        if duration_diff > 0:
+-            merged_audio = np.concatenate((merged_audio, silence_compensation))
++        # A longer converted chunk stays at its start. Padding in front of it
++        # delayed the voice by the extra length.
++        if start_new > len(merged_audio):
++            gap = np.zeros(start_new - len(merged_audio), dtype=merged_audio.dtype)
++            merged_audio = np.concatenate((merged_audio, gap))
+ 
+         merged_audio = np.concatenate((merged_audio, audio_segments_new[i]))
+ 
+-        if duration_diff < 0:
+-            merged_audio = np.concatenate((merged_audio, silence_compensation))
+-
+-        if i < len(intervals) - 1:
+-            next_start_new = int(intervals[i + 1][0] * sr_ratio)
+-            silence_duration = next_start_new - end_new
+-            if silence_duration > 0:
+-                silence = np.zeros(silence_duration, dtype=audio_segments_new[0].dtype)
+-                merged_audio = np.concatenate((merged_audio, silence))
++        if len(merged_audio) < end_new:
++            missing = np.zeros(end_new - len(merged_audio), dtype=merged_audio.dtype)
++            merged_audio = np.concatenate((merged_audio, missing))
+ 
+     return merged_audio
+diff --git a/rvc/lib/tools/test_split_audio.py b/rvc/lib/tools/test_split_audio.py
+new file mode 100644
+index 00000000..86268a8f
+--- /dev/null
++++ b/rvc/lib/tools/test_split_audio.py
+@@ -0,0 +1,49 @@
++import sys
++import types
++import unittest
++from pathlib import Path
++
++import numpy as np
++
++sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
++librosa = types.ModuleType("librosa")
++librosa.effects = types.ModuleType("librosa.effects")
++sys.modules.setdefault("librosa", librosa)
++sys.modules.setdefault("librosa.effects", librosa.effects)
++from rvc.lib.tools.split_audio import merge_audio
++
++
++class MergeAudioTests(unittest.TestCase):
++    def test_longer_chunk_stays_at_its_start(self):
++        original = [np.ones(16000, dtype=np.float32)]
++        converted = [np.ones(20000, dtype=np.float32)]
++        intervals = np.array([[16000, 32000]])
++        merged = merge_audio(original, converted, intervals, 16000, 16000)
++        self.assertEqual(int(np.argmax(merged > 0)), 16000)
++        self.assertTrue(np.all(merged[16000:36000] == 1))
++        self.assertTrue(np.all(merged[:16000] == 0))
++
++    def test_shorter_chunk_still_fills_its_slot(self):
++        original = [np.ones(16000, dtype=np.float32)]
++        converted = [np.full(12000, 2, dtype=np.float32)]
++        intervals = np.array([[16000, 32000]])
++        merged = merge_audio(original, converted, intervals, 16000, 16000)
++        self.assertEqual(len(merged), 32000)
++        self.assertTrue(np.all(merged[16000:28000] == 2))
++        self.assertTrue(np.all(merged[28000:] == 0))
++
++    def test_next_chunk_stays_on_time(self):
++        original = [np.ones(16000, dtype=np.float32), np.ones(16000, dtype=np.float32)]
++        converted = [
++            np.ones(20000, dtype=np.float32),
++            np.full(16000, 3, dtype=np.float32),
++        ]
++        intervals = np.array([[0, 16000], [32000, 48000]])
++        merged = merge_audio(original, converted, intervals, 16000, 16000)
++        self.assertTrue(np.all(merged[:20000] == 1))
++        self.assertTrue(np.all(merged[20000:32000] == 0))
++        self.assertTrue(np.all(merged[32000:48000] == 3))
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/rvc/realtime/pipeline.py b/rvc/realtime/pipeline.py
+index aefc07e6..83505377 100644
+--- a/rvc/realtime/pipeline.py
++++ b/rvc/realtime/pipeline.py
+@@ -15,7 +15,7 @@ from rvc.realtime.utils.torch import circular_write, AudioProcessorTorch, IndexW
+ from rvc.configs.config import Config
+ from rvc.infer.pipeline import Autotune
+ from rvc.lib.algorithm.synthesizers import Synthesizer
+-from rvc.lib.predictors.f0 import FCPE, RMVPE
++from rvc.lib.predictors.f0 import FCPE, RMVPE, Swift
+ from rvc.lib.utils import load_embedding, HubertModelWithFinalProj
+ 
+ 
+@@ -185,6 +185,12 @@ class Realtime_Pipeline:
+                 sample_rate=self.sample_rate,
+                 hop_size=self.window,
+             )
++        elif f0_method == "swift":
++            f0_model = Swift(
++                device=self.device,
++                sample_rate=self.sample_rate,
++                hop_size=self.window,
++            )
+         elif self.f0_method in ("crepe", "crepe-tiny"):
+             f0_model = None
+ 
+@@ -214,6 +220,10 @@ class Realtime_Pipeline:
+                 decoder_mode="local_argmax",
+                 threshold=0.006,
+             ).squeeze()
++        elif self.f0_method == "swift":
++            f0 = torch.from_numpy(
++                self.f0_model.get_f0(x, f0_min=self.f0_min, f0_max=self.f0_max)
++            ).to(self.device).float()
+         elif self.f0_method in ("crepe", "crepe-tiny"):
+             f0, pd = torchcrepe.predict(
+                 x.float().to(self.device).unsqueeze(dim=0),
+diff --git a/tabs/inference/inference.py b/tabs/inference/inference.py
+index 5d0399f2..484a0b2d 100644
+--- a/tabs/inference/inference.py
++++ b/tabs/inference/inference.py
+@@ -1144,6 +1144,7 @@ def inference_tab():
+                         "crepe-tiny",
+                         "rmvpe",
+                         "fcpe",
++                        "swift",
+                     ],
+                     value="rmvpe",
+                     interactive=True,
+@@ -1803,6 +1804,7 @@ def inference_tab():
+                         "crepe-tiny",
+                         "rmvpe",
+                         "fcpe",
++                        "swift",
+                     ],
+                     value="rmvpe",
+                     interactive=True,
+diff --git a/tabs/realtime/realtime.py b/tabs/realtime/realtime.py
+index cf8184b1..2254957e 100644
+--- a/tabs/realtime/realtime.py
++++ b/tabs/realtime/realtime.py
+@@ -1614,7 +1614,7 @@ def realtime_tab():
+                         interactive=True,
+                     )
+                     f0_method = gr.Radio(
+-                        choices=["rmvpe", "fcpe", "crepe", "crepe-tiny"],
++                        choices=["rmvpe", "fcpe", "crepe", "crepe-tiny", "swift"],
+                         value="fcpe",
+                         label=i18n("Pitch extraction algorithm"),
+                         info=i18n(

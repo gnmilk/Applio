@@ -1,0 +1,996 @@
+--- official-3.6.4/rvc/realtime/audio.py
++++ local-3.6.4/rvc/realtime/audio.py
+@@ -1,4 +1,5 @@
+ import os
++import re
+ import sys
+ import librosa
+ import traceback
+@@ -21,6 +22,180 @@
+     max_input_channels: int = 0
+     max_output_channels: int = 0
+     default_samplerate: int = 0
++
++    @property
++    def label(self) -> str:
++        return f"{self.name} ({self.host_api})"
++
++
++class AudioDeviceError(RuntimeError):
++    """Raised when a requested realtime audio endpoint cannot be used."""
++
++
++HOST_API_FALLBACK_ORDER = (
++    "Windows WASAPI",
++    "Windows DirectSound",
++    "MME",
++    "Windows WDM-KS",
++)
++
++
++def normalize_device_selection(value) -> str:
++    """Remove the old, unstable ``N:`` prefix from saved UI values."""
++    if value is None:
++        return ""
++    return re.sub(r"^\s*\d+\s*:\s*", "", str(value)).strip()
++
++
++def describe_audio_error(error: Exception) -> str:
++    message = str(error)
++    # 0x8889000A as a signed 32-bit HRESULT.  Windows reports it when an
++    # endpoint was unplugged, disabled, or reconfigured underneath a client.
++    if "-2004287478" in message and "AUDCLNT_E_DEVICE_INVALIDATED" not in message:
++        message += " [AUDCLNT_E_DEVICE_INVALIDATED / 0x8889000A]"
++    return message
++
++
++def refresh_portaudio() -> None:
++    """Rebuild PortAudio's endpoint list before resolving any device index."""
++    try:
++        sd.stop()
++    except Exception:
++        pass
++    try:
++        sd._terminate()
++    except Exception:
++        pass
++    try:
++        sd._initialize()
++    except Exception as error:
++        raise AudioDeviceError(f"Failed to reinitialize PortAudio: {error}") from error
++
++
++def _direction_channels(device: ServerAudioDevice, direction: str) -> int:
++    if direction == "input":
++        return device.max_input_channels
++    if direction == "output":
++        return device.max_output_channels
++    raise ValueError(f"Unsupported audio direction: {direction}")
++
++
++def _available_device_message(devices, direction: str) -> str:
++    available = [d.label for d in devices if _direction_channels(d, direction) > 0]
++    return "\n".join(f"  - {label}" for label in available) or "  (none)"
++
++
++def resolve_audio_device(selection, direction: str) -> ServerAudioDevice:
++    """Resolve a stable label to the current PortAudio endpoint.
++
++    Integer indices are accepted for backwards compatibility, but callers should
++    retain and pass the UI label (device name + host API) whenever possible.
++    """
++    inputs, outputs = list_audio_device()
++    devices = inputs if direction == "input" else outputs
++
++    if isinstance(selection, ServerAudioDevice):
++        wanted_label = selection.label
++    elif isinstance(selection, int):
++        matches = [d for d in devices if d.index == selection]
++        if matches:
++            return matches[0]
++        wanted_label = str(selection)
++    else:
++        wanted_label = normalize_device_selection(selection)
++
++    for device in devices:
++        if device.label.casefold() == wanted_label.casefold():
++            return device
++
++    # Handle labels assembled by older versions without relying on a temporary
++    # index.  Host API names are checked as suffixes because device names often
++    # contain their own parentheses.
++    host_api_names = sorted(
++        {d.host_api for d in devices}, key=len, reverse=True
++    )
++    for host_api in host_api_names:
++        suffix = f" ({host_api})"
++        if not wanted_label.casefold().endswith(suffix.casefold()):
++            continue
++        wanted_name = wanted_label[: -len(suffix)]
++        for device in devices:
++            if (
++                device.name.casefold() == wanted_name.casefold()
++                and device.host_api.casefold() == host_api.casefold()
++            ):
++                return device
++
++    raise AudioDeviceError(
++        f"Selected {direction} device is unavailable:\n"
++        f"  {selection}\n\n"
++        f"Current {direction} devices:\n{_available_device_message(devices, direction)}"
++    )
++
++
++def _fallback_candidates(primary: ServerAudioDevice, direction: str):
++    """Return same-name endpoints only, preferring WASAPI, DirectSound, MME."""
++    inputs, outputs = list_audio_device()
++    devices = inputs if direction == "input" else outputs
++    candidates = [primary]
++
++    if primary.host_api != "Windows WASAPI":
++        return candidates
++
++    for host_api in HOST_API_FALLBACK_ORDER[1:]:
++        matches = [
++            device
++            for device in devices
++            if device.host_api == host_api
++            and _direction_channels(device, direction) > 0
++            and (
++                _same_endpoint_name(device.name, primary.name, host_api)
++                or _safe_wdm_ks_alias(device, primary, direction)
++            )
++        ]
++        # Never guess when a shortened legacy MME name is ambiguous.
++        if len(matches) == 1 and matches[0].index != primary.index:
++            candidates.append(matches[0])
++    return candidates
++
++
++def _same_endpoint_name(candidate_name: str, primary_name: str, host_api: str) -> bool:
++    candidate = " ".join(candidate_name.casefold().split())
++    primary = " ".join(primary_name.casefold().split())
++    if candidate == primary:
++        return True
++    if host_api != "MME":
++        return False
++
++    # PortAudio's Windows MME backend truncates endpoint names (typically near
++    # 31 characters).  Accept only a long common prefix, and only when the
++    # caller found exactly one match for that host API.
++    shorter, longer = sorted((candidate, primary), key=len)
++    return len(shorter) >= 24 and longer.startswith(shorter)
++
++
++def _safe_wdm_ks_alias(
++    candidate: ServerAudioDevice,
++    primary: ServerAudioDevice,
++    direction: str,
++) -> bool:
++    """Recognize VB-CABLE's pin-style WDM-KS endpoint name.
++
++    PortAudio exposes the same VB-CABLE render pin as ``Output (VB-Audio
++    Point)`` under WDM-KS, so its name cannot be compared literally with the
++    friendly WASAPI name.  This deliberately narrow alias is accepted only for
++    the standard VB-CABLE render endpoint.  The caller additionally requires a
++    single match, preventing an ambiguous selection when several cables exist.
++    """
++    if direction != "output" or candidate.host_api != "Windows WDM-KS":
++        return False
++    primary_name = primary.name.casefold()
++    candidate_name = candidate.name.casefold()
++    return (
++        primary_name.startswith("cable input")
++        and "vb-audio virtual cable" in primary_name
++        and candidate_name == "output (vb-audio point)"
++    )
+ 
+ 
+ def check_the_device(device, type: str = "input"):
+@@ -238,77 +413,86 @@
+     def run_audio_stream(
+         self,
+         block_frame: int,
+-        input_device_id: int,
+-        output_device_id: int,
+-        output_monitor_id: int,
+-        input_max_channel: int,
+-        output_max_channel: int,
+-        output_monitor_max_channel: int,
++        input_device: ServerAudioDevice,
++        output_device: ServerAudioDevice,
++        output_monitor_device: ServerAudioDevice,
++        input_channels: int,
++        output_channels: int,
++        output_monitor_channels: int,
+         input_extra_setting,
+         output_extra_setting,
+         output_monitor_extra_setting,
+         audio_sample_rate: int,
+     ):
+-        use_asio = isinstance(input_extra_setting, sd.AsioSettings) or isinstance(
+-            output_extra_setting, sd.AsioSettings
+-        )
+-        if use_asio:
+-            # Re-initialize PortAudio to ensure a clean ASIO driver state.
+-            try:
+-                sd._terminate()
+-                sd._initialize()
+-            except Exception:
+-                pass
+-        if input_device_id != output_device_id:
+-            # Only use in cases involving different backends devices.
+-            self.input_stream = sd.InputStream(
+-                callback=self.audio_stream_no_output_callback,
+-                latency="low",
+-                dtype=np.float32,
+-                device=input_device_id,
+-                blocksize=block_frame,
+-                samplerate=audio_sample_rate,
+-                channels=input_max_channel,
+-                extra_settings=input_extra_setting,
+-            )
++        if input_device.index != output_device.index:
++            # Opening a PortAudio stream happens in the constructor.  Create the
++            # output first: some Windows drivers reject a second endpoint after
++            # an input endpoint from another host API/driver has been opened.
+             self.output_stream = sd.OutputStream(
+                 callback=lambda outdata, frames, times, status: self.audio_queue(
+                     outdata, self.output_audio_gain
+                 ),
+                 latency="low",
+                 dtype=np.float32,
+-                device=output_device_id,
++                device=output_device.index,
+                 blocksize=block_frame,
+                 samplerate=audio_sample_rate,
+-                channels=output_max_channel,
++                channels=output_channels,
+                 extra_settings=output_extra_setting,
++            )
++
++            if self.use_monitor:
++                self.monitor = sd.OutputStream(
++                    callback=lambda outdata, frames, times, status: self.audio_queue(
++                        outdata, self.monitor_audio_gain
++                    ),
++                    latency="low",
++                    dtype=np.float32,
++                    device=output_monitor_device.index,
++                    blocksize=block_frame,
++                    samplerate=audio_sample_rate,
++                    channels=output_monitor_channels,
++                    extra_settings=output_monitor_extra_setting,
++                )
++
++            self.input_stream = sd.InputStream(
++                callback=self.audio_stream_no_output_callback,
++                latency="low",
++                dtype=np.float32,
++                device=input_device.index,
++                blocksize=block_frame,
++                samplerate=audio_sample_rate,
++                channels=input_channels,
++                extra_settings=input_extra_setting,
+             )
+             self.input_stream.start()
+             self.output_stream.start()
++            if self.monitor is not None:
++                self.monitor.start()
+         else:
+             self.stream = sd.Stream(
+                 callback=self.audio_stream_callback,
+                 latency="low",
+                 dtype=np.float32,
+-                device=(input_device_id, output_device_id),
++                device=(input_device.index, output_device.index),
+                 blocksize=block_frame,
+                 samplerate=audio_sample_rate,
+-                channels=(input_max_channel, output_max_channel),
++                channels=(input_channels, output_channels),
+                 extra_settings=(input_extra_setting, output_extra_setting),
+             )
+             self.stream.start()
+ 
+-        if self.use_monitor:
++        if self.use_monitor and input_device.index == output_device.index:
+             self.monitor = sd.OutputStream(
+                 callback=lambda outdata, frames, times, status: self.audio_queue(
+                     outdata, self.monitor_audio_gain
+                 ),
+                 latency="low",
+                 dtype=np.float32,
+-                device=output_monitor_id,
++                device=output_monitor_device.index,
+                 blocksize=block_frame,
+                 samplerate=audio_sample_rate,
+-                channels=output_monitor_max_channel,
++                channels=output_monitor_channels,
+                 extra_settings=output_monitor_extra_setting,
+             )
+             self.monitor.start()
+@@ -334,9 +518,9 @@
+ 
+     def start(
+         self,
+-        input_device_id: int,
+-        output_device_id: int,
+-        output_monitor_id: int = None,
++        input_device_id,
++        output_device_id,
++        output_monitor_id=None,
+         exclusive_mode: bool = False,
+         asio_input_channel: int = 0,
+         asio_output_channel: int = 0,
+@@ -347,89 +531,297 @@
+     ):
+         self.stop()
+ 
+-        input_audio_device, output_audio_device = self.get_input_audio_device(
+-            input_device_id
+-        ), self.get_output_audio_device(output_device_id)
+-        input_channels, output_channels = (
+-            input_audio_device.max_input_channels,
+-            output_audio_device.max_output_channels,
+-        )
+-
+-        (
+-            input_extra_setting,
+-            output_extra_setting,
+-            output_monitor_extra_setting,
+-            monitor_channels,
+-        ) = (None, None, None, None)
+-
+-        if input_audio_device and "WASAPI" in input_audio_device.host_api:
+-            input_extra_setting = sd.WasapiSettings(
+-                exclusive=exclusive_mode, auto_convert=not exclusive_mode
++        print("[Audio] Refreshing PortAudio immediately before opening streams...")
++        refresh_portaudio()
++
++        requested_input = normalize_device_selection(input_device_id)
++        requested_output = normalize_device_selection(output_device_id)
++        requested_monitor = normalize_device_selection(output_monitor_id)
++        print(f"[Audio] Requested input: {requested_input}")
++        print(f"[Audio] Requested output: {requested_output}")
++        if self.use_monitor:
++            print(f"[Audio] Requested monitor: {requested_monitor}")
++
++        primary_input = resolve_audio_device(input_device_id, "input")
++        primary_output = resolve_audio_device(output_device_id, "output")
++        primary_monitor = (
++            resolve_audio_device(output_monitor_id, "output")
++            if self.use_monitor
++            else None
++        )
++
++        self._log_resolved_device("input", primary_input)
++        self._log_resolved_device("output", primary_output)
++        if primary_monitor is not None:
++            self._log_resolved_device("monitor", primary_monitor)
++
++        input_candidates = _fallback_candidates(primary_input, "input")
++        output_candidates = _fallback_candidates(primary_output, "output")
++        monitor_candidates = (
++            _fallback_candidates(primary_monitor, "output")
++            if primary_monitor is not None
++            else [None]
++        )
++        block_frame = read_chunk_size * 128
++        errors = []
++
++        # Output varies before input so a failed WASAPI output is retried with
++        # DirectSound without unnecessarily changing the selected microphone.
++        combinations = list(
++            (input_candidate, output_candidate, monitor_candidate)
++            for input_candidate in input_candidates
++            for output_candidate in output_candidates
++            for monitor_candidate in monitor_candidates
++        )
++        primary_combination = (primary_input, primary_output, primary_monitor)
++        attempts = [(primary_combination, False), (primary_combination, True)]
++        attempts.extend(
++            (combination, True)
++            for combination in combinations
++            if combination != primary_combination
++        )
++
++        for (input_device, output_device, monitor_device), refresh_before in attempts:
++            if refresh_before:
++                try:
++                    self.stop()
++                    if (
++                        input_device.label == primary_input.label
++                        and output_device.label == primary_output.label
++                        and (
++                            monitor_device is None
++                            or monitor_device.label == primary_monitor.label
++                        )
++                    ):
++                        print(
++                            "[Audio] Primary endpoint failed; releasing streams, "
++                            "refreshing PortAudio, and resolving it once more..."
++                        )
++                    refresh_portaudio()
++                    input_device = resolve_audio_device(input_device.label, "input")
++                    output_device = resolve_audio_device(output_device.label, "output")
++                    if monitor_device is not None:
++                        monitor_device = resolve_audio_device(
++                            monitor_device.label, "output"
++                        )
++                except Exception as error:
++                    attempt = (
++                        f"input={input_device.label}; output={output_device.label}"
++                    )
++                    errors.append(f"{attempt}: refresh/resolve failed: {error}")
++                    print(f"[Audio] Refresh/resolve failed ({attempt}): {error}")
++                    continue
++
++            if output_device.label != primary_output.label:
++                if output_device.host_api == "Windows WDM-KS":
++                    print(
++                        "[Audio] Standard Windows backends failed; retrying with "
++                        "the unique VB-CABLE WDM-KS render endpoint: "
++                        f"{output_device.name}"
++                    )
++                else:
++                    print(
++                        "[Audio] Retrying output with: "
++                        f"{output_device.name} / {output_device.host_api}"
++                    )
++            if input_device.label != primary_input.label:
++                print(
++                    "[Audio] Retrying input with: "
++                    f"{input_device.name} / {input_device.host_api}"
++                )
++            if (
++                monitor_device is not None
++                and monitor_device.label != primary_monitor.label
++            ):
++                print(
++                    "[Audio] Retrying monitor with: "
++                    f"{monitor_device.name} / {monitor_device.host_api}"
++                )
++
++            try:
++                input_channels, input_extra_setting = self._stream_settings(
++                    input_device,
++                    "input",
++                    exclusive_mode,
++                    asio_input_channel,
++                    asio_output_stereo,
++                )
++                output_channels, output_extra_setting = self._stream_settings(
++                    output_device,
++                    "output",
++                    exclusive_mode,
++                    asio_output_channel,
++                    asio_output_stereo,
++                )
++                if monitor_device is not None:
++                    monitor_channels, output_monitor_extra_setting = (
++                        self._stream_settings(
++                            monitor_device,
++                            "output",
++                            exclusive_mode,
++                            asio_output_monitor_channel,
++                            False,
++                        )
++                    )
++                else:
++                    monitor_channels, output_monitor_extra_setting = None, None
++
++                print(
++                    "[Audio] Stream config: "
++                    f"samplerate={audio_sample_rate}, blocksize={block_frame}, "
++                    f"input_channels={input_channels}, "
++                    f"output_channels={output_channels}, dtype=float32"
++                )
++                if input_device.default_samplerate != output_device.default_samplerate:
++                    print(
++                        "[Audio] Device default sample rates differ: "
++                        f"input={input_device.default_samplerate}, "
++                        f"output={output_device.default_samplerate}; "
++                        "validating the shared stream rate before opening."
++                    )
++
++                # Validate output first because it is the endpoint most often
++                # invalidated by Windows re-enumeration.
++                try:
++                    sd.check_output_settings(
++                        device=output_device.index,
++                        channels=output_channels,
++                        dtype="float32",
++                        extra_settings=output_extra_setting,
++                        samplerate=audio_sample_rate,
++                    )
++                except Exception as error:
++                    print(
++                        f"[Audio] {output_device.host_api} output validation "
++                        f"failed for {output_device.name}: {error}"
++                    )
++                    raise
++                print(
++                    "[Audio] check_output_settings OK: "
++                    f"{output_device.label}"
++                )
++                try:
++                    sd.check_input_settings(
++                        device=input_device.index,
++                        channels=input_channels,
++                        dtype="float32",
++                        extra_settings=input_extra_setting,
++                        samplerate=audio_sample_rate,
++                    )
++                except Exception as error:
++                    print(
++                        f"[Audio] {input_device.host_api} input validation "
++                        f"failed for {input_device.name}: {error}"
++                    )
++                    raise
++                print(
++                    "[Audio] check_input_settings OK: "
++                    f"{input_device.label}"
++                )
++                if monitor_device is not None:
++                    sd.check_output_settings(
++                        device=monitor_device.index,
++                        channels=monitor_channels,
++                        dtype="float32",
++                        extra_settings=output_monitor_extra_setting,
++                        samplerate=audio_sample_rate,
++                    )
++                    print(
++                        "[Audio] check_output_settings OK (monitor): "
++                        f"{monitor_device.label}"
++                    )
++
++                self.run_audio_stream(
++                    block_frame,
++                    input_device,
++                    output_device,
++                    monitor_device,
++                    input_channels,
++                    output_channels,
++                    monitor_channels,
++                    input_extra_setting,
++                    output_extra_setting,
++                    output_monitor_extra_setting,
++                    audio_sample_rate,
++                )
++                self.running = True
++                if output_device.label != primary_output.label:
++                    print(
++                        "[Audio] Output fallback active: "
++                        f"{output_device.label}"
++                    )
++                if input_device.label != primary_input.label:
++                    print(
++                        "[Audio] Input fallback active: "
++                        f"{input_device.label}"
++                    )
++                return
++            except Exception as error:
++                self.stop()
++                attempt = (
++                    f"input={input_device.label}; output={output_device.label}"
++                )
++                if monitor_device is not None:
++                    attempt += f"; monitor={monitor_device.label}"
++                error_message = describe_audio_error(error)
++                errors.append(f"{attempt}: {error_message}")
++                print(
++                    f"[Audio] Stream validation/open failed ({attempt}): "
++                    f"{error_message}"
++                )
++
++        details = "\n".join(f"  - {error}" for error in errors)
++        raise AudioDeviceError(
++            "Unable to open the selected realtime audio devices.\n"
++            "WASAPI shared mode, same-name DirectSound/MME, and safe WDM-KS "
++            "fallbacks were tried.\n"
++            f"{details}"
++        )
++
++    @staticmethod
++    def _log_resolved_device(direction: str, device: ServerAudioDevice) -> None:
++        max_channels = (
++            device.max_input_channels
++            if direction == "input"
++            else device.max_output_channels
++        )
++        print(
++            f"[Audio] Resolved {direction}: index={device.index}, "
++            f"name={device.name}, hostapi={device.host_api}, "
++            f"default_sr={device.default_samplerate}, max_channels={max_channels}"
++        )
++
++    @staticmethod
++    def _stream_settings(
++        device: ServerAudioDevice,
++        direction: str,
++        exclusive_mode: bool,
++        asio_channel: int,
++        asio_output_stereo: bool,
++    ):
++        max_channels = _direction_channels(device, direction)
++        if max_channels <= 0:
++            raise AudioDeviceError(
++                f"{device.label} has no {direction} channels."
+             )
+-        elif (
+-            input_audio_device
+-            and "ASIO" in input_audio_device.host_api
+-            and asio_input_channel != -1
+-        ):
+-            input_extra_setting = sd.AsioSettings(
+-                channel_selectors=[asio_input_channel]
++
++        # Realtime processing is mono-in/stereo-out.  Never open all 16
++        # channels exposed by VB-CABLE's DirectSound endpoint.
++        channels = min(max_channels, 2)
++        extra_settings = None
++
++        if "WASAPI" in device.host_api:
++            extra_settings = sd.WasapiSettings(
++                exclusive=exclusive_mode,
++                auto_convert=not exclusive_mode,
++                explicit_sample_format=False,
+             )
+-            input_channels = 1
+-
+-        if output_audio_device and "WASAPI" in output_audio_device.host_api:
+-            output_extra_setting = sd.WasapiSettings(
+-                exclusive=exclusive_mode, auto_convert=not exclusive_mode
+-            )
+-        elif (
+-            output_audio_device
+-            and "ASIO" in output_audio_device.host_api
+-            and asio_output_channel != -1
+-        ):
+-            output_selectors = (
+-                [asio_output_channel, asio_output_channel + 1]
+-                if asio_output_stereo
+-                else [asio_output_channel]
+-            )
+-            output_extra_setting = sd.AsioSettings(channel_selectors=output_selectors)
+-            output_channels = len(output_selectors)
+-
+-        if self.use_monitor:
+-            output_monitor_device = self.get_output_audio_device(output_monitor_id)
+-            monitor_channels = output_monitor_device.max_output_channels
+-
+-            if output_monitor_device and "WASAPI" in output_monitor_device.host_api:
+-                output_monitor_extra_setting = sd.WasapiSettings(
+-                    exclusive=exclusive_mode,
+-                    auto_convert=not exclusive_mode,
+-                )
+-            elif (
+-                output_monitor_device
+-                and "ASIO" in output_monitor_device.host_api
+-                and asio_output_monitor_channel != -1
+-            ):
+-                output_monitor_extra_setting = sd.AsioSettings(
+-                    channel_selectors=[asio_output_monitor_channel]
+-                )
+-                monitor_channels = 1
+-
+-        block_frame = read_chunk_size * 128
+-
+-        try:
+-            self.run_audio_stream(
+-                block_frame,
+-                input_device_id,
+-                output_device_id,
+-                output_monitor_id,
+-                input_channels,
+-                output_channels,
+-                monitor_channels,
+-                input_extra_setting,
+-                output_extra_setting,
+-                output_monitor_extra_setting,
+-                audio_sample_rate,
+-            )
+-            self.running = True
+-        except Exception as error:
+-            print(f"An error occurred while streaming audio: {error}")
+-            print(traceback.format_exc())
+-            raise
++        elif "ASIO" in device.host_api and asio_channel != -1:
++            if direction == "input" or not asio_output_stereo:
++                selectors = [asio_channel]
++            else:
++                selectors = [asio_channel, asio_channel + 1]
++            extra_settings = sd.AsioSettings(channel_selectors=selectors)
++            channels = len(selectors)
++
++        return channels, extra_settings
+--- official-3.6.4/rvc/realtime/core.py
++++ local-3.6.4/rvc/realtime/core.py
+@@ -430,7 +430,8 @@
+         )
+ 
+         # Scale output by the current input RMS to suppress residue during silence.
+-        audio_out: torch.Tensor = self.resample_out(audio_model * vol_t)
++        #audio_out: torch.Tensor = self.resample_out(audio_model * vol_t)
++        audio_out: torch.Tensor = self.resample_out(audio_model)
+         return audio_out, vol, False
+ 
+     def __del__(self):
+--- official-3.6.4/tabs/realtime/realtime.py
++++ local-3.6.4/tabs/realtime/realtime.py
+@@ -384,15 +384,31 @@
+ 
+ 
+ def get_safe_dropdown_value(saved_value, choices, fallback_value=None):
+-    """Safely get a dropdown value, ensuring it exists in choices"""
++    """Safely restore dropdown values, including old numbered audio-device values."""
++
+     if saved_value and saved_value in choices:
+         return saved_value
+-    elif fallback_value and fallback_value in choices:
+-        return fallback_value
+-    elif choices:
++
++    # Compatibility with old values such as:
++    # "3: CABLE Input (...)"
++    if saved_value:
++        normalized_saved = normalize_audio_device_name(saved_value)
++
++        for choice in choices:
++            if normalize_audio_device_name(choice) == normalized_saved:
++                return choice
++
++    if fallback_value:
++        normalized_fallback = normalize_audio_device_name(fallback_value)
++
++        for choice in choices:
++            if normalize_audio_device_name(choice) == normalized_fallback:
++                return choice
++
++    if choices:
+         return choices[0]
+-    else:
+-        return None
++
++    return None
+ 
+ 
+ def get_safe_index_value(saved_value, choices, fallback_value=None):
+@@ -534,16 +550,53 @@
+     monitor_audio_gain /= 100.0
+ 
+     try:
+-        input_devices, output_devices = get_audio_devices_formatted()
+-        input_device_id = input_devices[input_audio_device]
+-        output_device_id = output_devices[output_audio_device]
+-        output_monitor_id = (
+-            output_devices[monitor_output_device] if use_monitor_device else None
+-        )
+-    except (ValueError, IndexError):
+-        print(f"Error: incorrectly formatted audio device.")
+-        yield "Incorrectly formatted audio device. Stopping.", interactive_true, interactive_false
++        print("[Audio] Refreshing PortAudio devices before starting Realtime...")
++    
++        # Force Windows/PortAudio to rebuild its endpoint list.
++        reinitialize_audio_backend()
++    
++        # Resolve the CURRENT PortAudio indices by stable device identity.
++        input_device_id = resolve_audio_device(
++            input_audio_device,
++            "input",
++        )
++    
++        output_device_id = resolve_audio_device(
++            output_audio_device,
++            "output",
++        )
++    
++        output_monitor_id = None
++    
++        if use_monitor_device:
++            output_monitor_id = resolve_audio_device(
++                monitor_output_device,
++                "output",
++            )
++    
++    except Exception as e:
++        running = False
++
++        print(
++            f"[Audio] Failed to resolve audio devices: "
++            f"{e}"
++        )
++
++        yield (
++            "Audio device changed or is unavailable.\n"
++            + str(e),
++            interactive_true,
++            interactive_false,
++        )
++
+         return
++        
++    print(
++        f"[Audio] Devices ready: "
++        f"input={input_device_id}, "
++        f"output={output_device_id}, "
++        f"monitor={output_monitor_id}"
++    )        
+ 
+     # Load ASIO and sample rate settings from config.
+     _rt_cfg = load_realtime_settings()
+@@ -632,9 +685,14 @@
+     audio_manager = callbacks.audio
+     try:
+         audio_manager.start(
+-            input_device_id=input_device_id,
+-            output_device_id=output_device_id,
+-            output_monitor_id=output_monitor_id,
++            # Pass stable identities all the way to audio.py.  That module
++            # re-enumerates and resolves the current indices immediately before
++            # constructing the PortAudio streams.
++            input_device_id=input_audio_device,
++            output_device_id=output_audio_device,
++            output_monitor_id=(
++                monitor_output_device if use_monitor_device else None
++            ),
+             exclusive_mode=exclusive_mode,
+             asio_input_channel=input_asio_channels if asio_enabled else -1,
+             asio_output_channel=output_asio_channels if asio_enabled else -1,
+@@ -645,6 +703,11 @@
+         )
+     except Exception as error:
+         running = False
++        if callbacks is not None:
++            try:
++                callbacks.vc.stop()
++            except Exception:
++                pass
+         print(f"Realtime error: {error}")
+         yield "Error: " + str(error), interactive_true, interactive_false
+         return
+@@ -823,24 +886,136 @@
+                 return 1
+             return 2
+ 
+-        output_sorted = sorted(output_devices, key=lambda d: priority(d.name))
++        output_sorted = sorted(
++            output_devices,
++            key=lambda d: priority(d.name),
++        )
++
+         input_sorted = sorted(
+-            input_devices, key=lambda d: priority(d.name), reverse=True
+-        )
+-
++            input_devices,
++            key=lambda d: priority(d.name),
++            reverse=True,
++        )
++
++        # IMPORTANT:
++        # Do NOT include the temporary sorted position (1:, 2:, 3: ...)
++        # in the device key. Windows/PortAudio may re-enumerate devices,
++        # but name + host API normally stays stable.
+         input_device_list = {
+-            f"{input_sorted.index(d)+1}: {d.name} ({d.host_api})": d.index
++            f"{d.name} ({d.host_api})": d.index
+             for d in input_sorted
+         }
++
+         output_device_list = {
+-            f"{output_sorted.index(d)+1}: {d.name} ({d.host_api})": d.index
++            f"{d.name} ({d.host_api})": d.index
+             for d in output_sorted
+         }
+ 
+         return input_device_list, output_device_list
++
++    except Exception as e:
++        print(f"Error enumerating audio devices: {e}")
++        return {}, {}
++
++def normalize_audio_device_name(value):
++    """
++    Remove Applio's old dynamic prefix:
++        '3: Device Name (...)'
++    ->
++        'Device Name (...)'
++    """
++    if not value:
++        return ""
++
++    return re.sub(r"^\s*\d+\s*:\s*", "", str(value)).strip()
++
++
++def reinitialize_audio_backend():
++    """
++    Force PortAudio/sounddevice to rebuild the device list.
++
++    Must only be called before streams are opened.
++    """
++    try:
++        sd.stop()
+     except Exception:
+-        return {}, {}
+-
++        pass
++
++    try:
++        sd._terminate()
++    except Exception:
++        pass
++
++    try:
++        sd._initialize()
++    except Exception as e:
++        raise RuntimeError(
++            f"Failed to reinitialize PortAudio: {e}"
++        ) from e
++
++
++def resolve_audio_device(selection, device_type):
++    """
++    Resolve a UI device selection to the CURRENT PortAudio device index.
++
++    device_type:
++        'input'
++        'output'
++    """
++
++    if not selection:
++        raise RuntimeError(
++            f"No {device_type} audio device selected."
++        )
++
++    input_devices, output_devices = get_audio_devices_formatted()
++
++    devices = (
++        input_devices
++        if device_type == "input"
++        else output_devices
++    )
++
++    wanted = normalize_audio_device_name(selection)
++
++    # First try exact/current normalized name.
++    for label, device_index in devices.items():
++        if normalize_audio_device_name(label) == wanted:
++            try:
++                info = sd.query_devices(device_index)
++
++                if device_type == "input":
++                    channels = int(info["max_input_channels"])
++                else:
++                    channels = int(info["max_output_channels"])
++
++                if channels <= 0:
++                    continue
++
++                print(
++                    f"[Audio] Resolved {device_type}: "
++                    f"{label} -> PortAudio index {device_index}"
++                )
++
++                return device_index
++
++            except Exception as e:
++                print(
++                    f"[Audio] Device validation failed "
++                    f"for index {device_index}: {e}"
++                )
++
++    available = "\n".join(
++        f"  - {label}"
++        for label in devices.keys()
++    )
++
++    raise RuntimeError(
++        f"Selected {device_type} device is no longer available:\n"
++        f"{selection}\n\n"
++        f"Current {device_type} devices:\n"
++        f"{available}"
++    )
+ 
+ def update_dropdowns_from_json(data):
+     if not data:

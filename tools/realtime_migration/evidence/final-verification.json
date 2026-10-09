@@ -1,0 +1,46 @@
+{
+  "syntax": {
+    "status": "PASS",
+    "files": 119,
+    "writes_pycache": false
+  },
+  "preservation": {
+    "status": "PASS",
+    "original_baseline": "bfb9e0e5e192e08885da984a62e78e872153fbda",
+    "new_head": "2cd2b4a23d1bd9e47f05698f39179724bf156222",
+    "config_sha256_at_verification": "722c1083847e8b3cb51372c17715dd3fc5c6ebb5ee2c27983e765a59d73ea574",
+    "config_changed_since_migration_start": true,
+    "backups_match_original": true,
+    "old_source_matches_old_baseline": true,
+    "config_unchanged_during_verification": true
+  },
+  "core_preservation": {
+    "status": "PASS",
+    "only_behavior_change": "remove final extra RMS multiplication"
+  },
+  "imports_and_signatures": {
+    "status": "PASS",
+    "modules": [
+      "core",
+      "audio",
+      "callbacks",
+      "pipeline",
+      "worker",
+      "client",
+      "UI",
+      "utils"
+    ]
+  },
+  "regressions": {
+    "status": "PASS",
+    "run": 23,
+    "failures": 0,
+    "errors": 0,
+    "real_audio_streams": false,
+    "gpu_inference": false
+  },
+  "hardware_after_bsod": {
+    "status": "NOT TESTED",
+    "reason": "WDF_VIOLATION 0x10d parameter1=5; no further real streams/GPU tests"
+  }
+}

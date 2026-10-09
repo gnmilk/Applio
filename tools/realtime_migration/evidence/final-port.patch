@@ -1,0 +1,901 @@
+diff --git a/rvc/lib/utils.py b/rvc/lib/utils.py
+index a4eacd0c..8e6ccaa3 100644
+--- a/rvc/lib/utils.py
++++ b/rvc/lib/utils.py
+@@ -127,7 +127,7 @@ def format_title(title):
+     return formatted_title
+ 
+ 
+-def load_embedding(embedder_model, custom_embedder=None):
++def load_embedding(embedder_model, custom_embedder=None, *, allow_fallback=True):
+     embedder_root = os.path.join(now_dir, "rvc", "models", "embedders")
+     embedding_list = {
+         "contentvec": os.path.join(embedder_root, "contentvec"),
+@@ -157,8 +157,14 @@ def load_embedding(embedder_model, custom_embedder=None):
+     }
+ 
+     if embedder_model == "custom":
+-        if os.path.exists(custom_embedder):
++        if custom_embedder and os.path.isdir(custom_embedder):
+             model_path = custom_embedder
++        elif not allow_fallback:
++            raise FileNotFoundError(
++                f"Custom embedder directory is unavailable: {custom_embedder!r}. "
++                "Select the original Chinese HuBERT model directory; "
++                "Realtime will not substitute ContentVec."
++            )
+         else:
+             print(f"Custom embedder not found: {custom_embedder}, using contentvec")
+             model_path = embedding_list["contentvec"]
+diff --git a/rvc/realtime/audio.py b/rvc/realtime/audio.py
+index 06a99f81..053d5440 100644
+--- a/rvc/realtime/audio.py
++++ b/rvc/realtime/audio.py
+@@ -1,10 +1,13 @@
+ import os
++import re
+ import sys
++import threading
++import weakref
+ import librosa
+ import traceback
+ import numpy as np
+ import sounddevice as sd
+-from queue import Queue
++from queue import Queue, Empty
+ from dataclasses import dataclass
+ 
+ now_dir = os.getcwd()
+@@ -22,6 +25,104 @@ class ServerAudioDevice:
+     max_output_channels: int = 0
+     default_samplerate: int = 0
+ 
++    @property
++    def label(self) -> str:
++        return f"{self.name} ({self.host_api})"
++
++
++class AudioDeviceError(RuntimeError):
++    """An audio endpoint cannot be resolved, validated or opened safely."""
++
++
++# Serialize control operations only; callbacks never acquire this lock.
++_backend_lock = threading.RLock()
++_audio_instances = weakref.WeakSet()
++
++
++def normalize_audio_device_name(value) -> str:
++    return re.sub(r"^\s*\d+\s*:\s*", "", str(value or "")).strip()
++
++
++def reinitialize_audio_backend():
++    """Refresh only after every Applio stream has been closed."""
++    with _backend_lock:
++        if any(
++            getattr(audio, name, None) is not None
++            for audio in _audio_instances
++            for name in ("stream", "input_stream", "output_stream", "monitor")
++        ):
++            raise AudioDeviceError("Stop Realtime before refreshing audio devices.")
++        try:
++            sd._terminate()
++            sd._initialize()
++        except Exception as error:
++            raise AudioDeviceError(f"Failed to reinitialize PortAudio: {error}") from error
++
++
++def resolve_audio_device(selection, direction: str, devices=None) -> ServerAudioDevice:
++    """Resolve name + host API in the current inventory, never guessing a duplicate."""
++    if direction not in ("input", "output"):
++        raise ValueError(f"Unsupported audio direction: {direction}")
++    if devices is None:
++        inputs, outputs = list_audio_device()
++        devices = inputs if direction == "input" else outputs
++    if isinstance(selection, ServerAudioDevice):
++        selection = selection.label
++    if isinstance(selection, int):
++        matches = [d for d in devices if d.index == selection]
++    else:
++        wanted = normalize_audio_device_name(selection).casefold()
++        matches = [d for d in devices if d.label.casefold() == wanted]
++        # Legacy name-only values are usable only if a single endpoint matches.
++        if not matches:
++            matches = [d for d in devices if d.name.casefold() == wanted]
++    channel_key = "max_input_channels" if direction == "input" else "max_output_channels"
++    matches = [d for d in matches if getattr(d, channel_key) > 0]
++    if len(matches) == 1:
++        return matches[0]
++    reason = "ambiguous" if matches else "unavailable"
++    available = "\n".join(f"  - {d.label} [index={d.index}]" for d in devices) or "  (none)"
++    raise AudioDeviceError(
++        f"Selected {direction} device is {reason}: {selection!r}\n"
++        f"Current {direction} devices:\n{available}\n"
++        "Refresh Audio Devices and select the device and Host API again."
++    )
++
++
++def describe_audio_error(error):
++    message = str(error)
++    if "-2004287478" in message and "AUDCLNT_E_DEVICE_INVALIDATED" not in message:
++        message += " [AUDCLNT_E_DEVICE_INVALIDATED / 0x8889000A]"
++    return message
++
++
++def _fallback_candidates(primary, direction, devices):
++    """Old custom fallback: same endpoint only, never an ambiguous shortened name."""
++    candidates = [primary]
++    if primary.host_api != "Windows WASAPI":
++        return candidates
++    primary_name = " ".join(primary.name.casefold().split())
++    # Do not escalate automatically to kernel-streaming drivers. The old
++    # WDM-KS alias has not been verified on this installation.
++    for api in ("Windows DirectSound", "MME"):
++        matches = []
++        for device in devices:
++            if device.host_api != api:
++                continue
++            name = " ".join(device.name.casefold().split())
++            same = name == primary_name
++            if api == "MME":
++                shorter, longer = sorted((name, primary_name), key=len)
++                if len(shorter) >= 24 and longer.startswith(shorter):
++                    sources = [d for d in devices if d.host_api == primary.host_api
++                               and " ".join(d.name.casefold().split()).startswith(name)]
++                    same |= len(sources) == 1 and sources[0].index == primary.index
++            if same:
++                matches.append(device)
++        if len(matches) == 1:
++            candidates.append(matches[0])
++    return candidates
++
+ 
+ def check_the_device(device, type: str = "input"):
+     if sys.platform == "linux" and "hw:" not in device["name"]:
+@@ -153,6 +254,7 @@ class Audio:
+         self.f0_autotune_strength = f0_autotune_strength
+         self.proposed_pitch = proposed_pitch
+         self.proposed_pitch_threshold = proposed_pitch_threshold
++        _audio_instances.add(self)
+ 
+     def get_input_audio_device(self, index: int):
+         audioinput, _ = list_audio_device()
+@@ -220,16 +322,23 @@ class Audio:
+             print(traceback.format_exc())
+ 
+     def audio_queue(self, outdata: np.ndarray, gain: float):
++        outdata.fill(0)
+         try:
+-            mon_wav = self.mon_queue.get()
+-
+-            while self.mon_queue.qsize() > 0:
+-                self.mon_queue.get()
++            mon_wav = self.mon_queue.get_nowait()
++            # Preserve the existing policy: play the oldest pending block and
++            # discard its stale backlog. Bound work to the initial queue depth.
++            for _ in range(self.mon_queue.qsize()):
++                try:
++                    self.mon_queue.get_nowait()
++                except Empty:
++                    break
+ 
+             output_channels = outdata.shape[1]
+             outdata[:] = (
+                 np.repeat(mon_wav, output_channels).reshape(-1, output_channels) * gain
+             )
++        except Empty:
++            return
+         except Exception as error:
+             print(f"An error occurred while running the audio queue: {error}")
+             print(traceback.format_exc())
+@@ -248,28 +357,8 @@ class Audio:
+         output_monitor_extra_setting,
+         audio_sample_rate: int,
+     ):
+-        use_asio = isinstance(input_extra_setting, sd.AsioSettings) or isinstance(
+-            output_extra_setting, sd.AsioSettings
+-        )
+-        if use_asio:
+-            # Re-initialize PortAudio to ensure a clean ASIO driver state.
+-            try:
+-                sd._terminate()
+-                sd._initialize()
+-            except Exception:
+-                pass
+         if input_device_id != output_device_id:
+-            # Only use in cases involving different backends devices.
+-            self.input_stream = sd.InputStream(
+-                callback=self.audio_stream_no_output_callback,
+-                latency="low",
+-                dtype=np.float32,
+-                device=input_device_id,
+-                blocksize=block_frame,
+-                samplerate=audio_sample_rate,
+-                channels=input_max_channel,
+-                extra_settings=input_extra_setting,
+-            )
++            # Old Windows fix: constructors open devices, so open output first.
+             self.output_stream = sd.OutputStream(
+                 callback=lambda outdata, frames, times, status: self.audio_queue(
+                     outdata, self.output_audio_gain
+@@ -282,8 +371,33 @@ class Audio:
+                 channels=output_max_channel,
+                 extra_settings=output_extra_setting,
+             )
++            if self.use_monitor:
++                self.monitor = sd.OutputStream(
++                    callback=lambda outdata, frames, times, status: self.audio_queue(
++                        outdata, self.monitor_audio_gain
++                    ),
++                    latency="low",
++                    dtype=np.float32,
++                    device=output_monitor_id,
++                    blocksize=block_frame,
++                    samplerate=audio_sample_rate,
++                    channels=output_monitor_max_channel,
++                    extra_settings=output_monitor_extra_setting,
++                )
++            self.input_stream = sd.InputStream(
++                callback=self.audio_stream_no_output_callback,
++                latency="low",
++                dtype=np.float32,
++                device=input_device_id,
++                blocksize=block_frame,
++                samplerate=audio_sample_rate,
++                channels=input_max_channel,
++                extra_settings=input_extra_setting,
++            )
+             self.input_stream.start()
+             self.output_stream.start()
++            if self.monitor is not None:
++                self.monitor.start()
+         else:
+             self.stream = sd.Stream(
+                 callback=self.audio_stream_callback,
+@@ -297,7 +411,7 @@ class Audio:
+             )
+             self.stream.start()
+ 
+-        if self.use_monitor:
++        if self.use_monitor and input_device_id == output_device_id:
+             self.monitor = sd.OutputStream(
+                 callback=lambda outdata, frames, times, status: self.audio_queue(
+                     outdata, self.monitor_audio_gain
+@@ -313,29 +427,38 @@ class Audio:
+             self.monitor.start()
+ 
+     def stop(self):
+-        self.running = False
+-
+-        if self.stream is not None:
+-            self.stream.close()
+-            self.stream = None
+-
+-        if self.input_stream is not None:
+-            self.input_stream.close()
+-            self.input_stream = None
+-
+-        if self.output_stream is not None:
+-            self.output_stream.close()
+-            self.output_stream = None
+-
+-        if self.monitor is not None:
+-            self.monitor.close()
+-            self.monitor = None
++        with _backend_lock:
++            self.running = False
++            errors = []
++            # Quiesce output callbacks before stopping their producer.
++            for name in ("monitor", "output_stream", "stream", "input_stream"):
++                stream = getattr(self, name)
++                if stream is None:
++                    continue
++                try:
++                    stream.stop()
++                except Exception as error:
++                    print(f"[Audio] {name}.stop: {describe_audio_error(error)}")
++                try:
++                    stream.close()
++                except Exception as error:
++                    errors.append(f"{name}: {describe_audio_error(error)}")
++                else:
++                    setattr(self, name, None)
++            # Drain only once all callbacks have released their resources.
++            if errors:
++                raise AudioDeviceError("Unable to close audio streams: " + "; ".join(errors))
++            while True:
++                try:
++                    self.mon_queue.get_nowait()
++                except Empty:
++                    break
+ 
+     def start(
+         self,
+-        input_device_id: int,
+-        output_device_id: int,
+-        output_monitor_id: int = None,
++        input_device_id,
++        output_device_id,
++        output_monitor_id=None,
+         exclusive_mode: bool = False,
+         asio_input_channel: int = 0,
+         asio_output_channel: int = 0,
+@@ -344,89 +467,109 @@ class Audio:
+         audio_sample_rate: int = AUDIO_SAMPLE_RATE,
+         asio_output_stereo: bool = True,
+     ):
+-        self.stop()
+-
+-        input_audio_device, output_audio_device = self.get_input_audio_device(
+-            input_device_id
+-        ), self.get_output_audio_device(output_device_id)
+-        input_channels, output_channels = (
+-            input_audio_device.max_input_channels,
+-            output_audio_device.max_output_channels,
+-        )
+-
+-        (
+-            input_extra_setting,
+-            output_extra_setting,
+-            output_monitor_extra_setting,
+-            monitor_channels,
+-        ) = (None, None, None, None)
+-
+-        if input_audio_device and "WASAPI" in input_audio_device.host_api:
+-            input_extra_setting = sd.WasapiSettings(
+-                exclusive=exclusive_mode, auto_convert=not exclusive_mode
+-            )
+-        elif (
+-            input_audio_device
+-            and "ASIO" in input_audio_device.host_api
+-            and asio_input_channel != -1
+-        ):
+-            input_extra_setting = sd.AsioSettings(
+-                channel_selectors=[asio_input_channel]
+-            )
+-            input_channels = 1
+-
+-        if output_audio_device and "WASAPI" in output_audio_device.host_api:
+-            output_extra_setting = sd.WasapiSettings(
+-                exclusive=exclusive_mode, auto_convert=not exclusive_mode
+-            )
+-        elif (
+-            output_audio_device
+-            and "ASIO" in output_audio_device.host_api
+-            and asio_output_channel != -1
+-        ):
+-            output_selectors = (
+-                [asio_output_channel, asio_output_channel + 1]
+-                if asio_output_stereo
+-                else [asio_output_channel]
++        with _backend_lock:
++            self.stop()
++            # Bare indexes are legacy current-session inputs only. Convert them
++            # to identities BEFORE refresh, then re-resolve after refresh.
++            requested = [input_device_id, output_device_id, output_monitor_id]
++            for i, direction in ((0, "input"), (1, "output"), (2, "output")):
++                if isinstance(requested[i], int) and (i != 2 or self.use_monitor):
++                    requested[i] = resolve_audio_device(requested[i], direction).label
++            reinitialize_audio_backend()
++            inputs, outputs = list_audio_device()
++            primary_input = resolve_audio_device(requested[0], "input", inputs)
++            primary_output = resolve_audio_device(requested[1], "output", outputs)
++            primary_monitor = (resolve_audio_device(requested[2], "output", outputs)
++                               if self.use_monitor else None)
++            if block_frame <= 0 or audio_sample_rate <= 0:
++                raise AudioDeviceError("Chunk frames and sample rate must be positive.")
++
++            input_candidates = ([primary_input] if exclusive_mode else
++                                _fallback_candidates(primary_input, "input", inputs))
++            output_candidates = ([primary_output] if exclusive_mode else
++                                 _fallback_candidates(primary_output, "output", outputs))
++            monitor_candidates = ([primary_monitor] if exclusive_mode or primary_monitor is None else
++                                  _fallback_candidates(primary_monitor, "output", outputs))
++            combinations = [(i, o, m) for i in input_candidates
++                            for o in output_candidates for m in monitor_candidates]
++            # One same-identity retry, then the evidenced conservative fallbacks.
++            attempts = [combinations[0], *combinations]
++            errors = []
++            for attempt_number, (input_device, output_device, monitor_device) in enumerate(attempts):
++                try:
++                    if attempt_number:
++                        self.stop()
++                        reinitialize_audio_backend()
++                        inputs, outputs = list_audio_device()
++                    input_device = resolve_audio_device(input_device.label, "input", inputs)
++                    output_device = resolve_audio_device(output_device.label, "output", outputs)
++                    if monitor_device is not None:
++                        monitor_device = resolve_audio_device(monitor_device.label, "output", outputs)
++                    # A retry refresh can add another endpoint sharing a
++                    # truncated MME name. Revalidate the alias, not just its index.
++                    for candidate, primary, direction, inventory in (
++                        (input_device, primary_input, "input", inputs),
++                        (output_device, primary_output, "output", outputs),
++                        (monitor_device, primary_monitor, "output", outputs),
++                    ):
++                        if candidate is None or candidate.label == primary.label:
++                            continue
++                        current_primary = resolve_audio_device(primary.label, direction, inventory)
++                        allowed = _fallback_candidates(current_primary, direction, inventory)
++                        if not any(d.label == candidate.label for d in allowed):
++                            raise AudioDeviceError(f"Fallback identity became ambiguous or unavailable: {candidate.label}")
++                    in_channels, in_extra = self._stream_settings(input_device, "input", exclusive_mode, asio_input_channel, False)
++                    out_channels, out_extra = self._stream_settings(output_device, "output", exclusive_mode, asio_output_channel, asio_output_stereo)
++                    mon_channels, mon_extra = (self._stream_settings(monitor_device, "output", exclusive_mode, asio_output_monitor_channel, False)
++                                              if monitor_device is not None else (None, None))
++                    for direction, device, channels, extra in (
++                        ("output", output_device, out_channels, out_extra),
++                        ("input", input_device, in_channels, in_extra),
++                        ("output", monitor_device, mon_channels, mon_extra),
++                    ):
++                        if device is None:
++                            continue
++                        print(f"[Audio] {direction}: {device.label}; index={device.index}; "
++                              f"channels={channels}/{getattr(device, 'max_' + direction + '_channels')}; "
++                              f"default_sr={device.default_samplerate}; stream_sr={audio_sample_rate}; "
++                              f"block_frame={block_frame}; float32; attempt={attempt_number + 1}")
++                        check = sd.check_input_settings if direction == "input" else sd.check_output_settings
++                        check(device=device.index, channels=channels, dtype="float32",
++                              extra_settings=extra, samplerate=audio_sample_rate)
++                    self.run_audio_stream(block_frame, input_device.index, output_device.index,
++                                          monitor_device.index if monitor_device else None,
++                                          in_channels, out_channels, mon_channels,
++                                          in_extra, out_extra, mon_extra, audio_sample_rate)
++                    self.running = True
++                    if attempt_number:
++                        print(f"[Audio] Retry/fallback active: {input_device.label} -> {output_device.label}")
++                    return
++                except Exception as error:
++                    self.stop()
++                    detail = f"{input_device.label} -> {output_device.label}: {describe_audio_error(error)}"
++                    errors.append(detail)
++                    print(f"[Audio] Validation/open failed: {detail}")
++            raise AudioDeviceError(
++                "Unable to open Realtime audio devices. Stop other exclusive audio clients, "
++                "refresh devices and verify the selected Host API/sample rate.\n"
++                + "\n".join(errors)
+             )
+-            output_extra_setting = sd.AsioSettings(channel_selectors=output_selectors)
+-            output_channels = len(output_selectors)
+-
+-        if self.use_monitor:
+-            output_monitor_device = self.get_output_audio_device(output_monitor_id)
+-            monitor_channels = output_monitor_device.max_output_channels
+ 
+-            if output_monitor_device and "WASAPI" in output_monitor_device.host_api:
+-                output_monitor_extra_setting = sd.WasapiSettings(
+-                    exclusive=exclusive_mode,
+-                    auto_convert=not exclusive_mode,
+-                )
+-            elif (
+-                output_monitor_device
+-                and "ASIO" in output_monitor_device.host_api
+-                and asio_output_monitor_channel != -1
+-            ):
+-                output_monitor_extra_setting = sd.AsioSettings(
+-                    channel_selectors=[asio_output_monitor_channel]
+-                )
+-                monitor_channels = 1
+-
+-        try:
+-            self.run_audio_stream(
+-                block_frame,
+-                input_device_id,
+-                output_device_id,
+-                output_monitor_id,
+-                input_channels,
+-                output_channels,
+-                monitor_channels,
+-                input_extra_setting,
+-                output_extra_setting,
+-                output_monitor_extra_setting,
+-                audio_sample_rate,
+-            )
+-            self.running = True
+-        except Exception as error:
+-            print(f"An error occurred while streaming audio: {error}")
+-            print(traceback.format_exc())
+-            raise
++    @staticmethod
++    def _stream_settings(device, direction, exclusive_mode, asio_channel, asio_output_stereo):
++        maximum = getattr(device, "max_" + direction + "_channels")
++        if maximum <= 0:
++            raise AudioDeviceError(f"{device.label} has no {direction} channels.")
++        channels = min(maximum, 2)
++        extra = None
++        if "WASAPI" in device.host_api:
++            extra = sd.WasapiSettings(exclusive=exclusive_mode, auto_convert=not exclusive_mode,
++                                      explicit_sample_format=False)
++        elif "ASIO" in device.host_api and asio_channel != -1:
++            selectors = ([asio_channel, asio_channel + 1]
++                         if direction == "output" and asio_output_stereo else [asio_channel])
++            if any(channel < 0 or channel >= maximum for channel in selectors):
++                raise AudioDeviceError(f"Invalid {direction} ASIO channels {selectors}; {device.label} exposes {maximum} channels.")
++            extra = sd.AsioSettings(channel_selectors=selectors)
++            channels = len(selectors)
++        return channels, extra
+diff --git a/rvc/realtime/client.py b/rvc/realtime/client.py
+index a5dc445a..d0da9f4a 100644
+--- a/rvc/realtime/client.py
++++ b/rvc/realtime/client.py
+@@ -200,7 +200,9 @@ async def change_config(ws: WebSocket):
+ 
+         from rvc.lib.utils import load_embedding
+ 
+-        hubert_model = load_embedding(embedder_model, embedder_model_custom)
++        hubert_model = load_embedding(
++            embedder_model, embedder_model_custom, allow_fallback=False
++        )
+         hubert_model = hubert_model.to(vc_instance.device).float()
+         hubert_model.eval()
+ 
+diff --git a/rvc/realtime/core.py b/rvc/realtime/core.py
+index b18b1080..2dc544aa 100644
+--- a/rvc/realtime/core.py
++++ b/rvc/realtime/core.py
+@@ -429,8 +429,9 @@ class Realtime:
+             block_size_16k=self.block_frame_16k,
+         )
+ 
+-        # Scale output by the current input RMS to suppress residue during silence.
+-        audio_out: torch.Tensor = self.resample_out(audio_model * vol_t)
++        # Silence is handled above by VAD/threshold/warmup; the pipeline already
++        # applies the selected volume envelope. Do not attenuate it a second time.
++        audio_out: torch.Tensor = self.resample_out(audio_model)
+         return audio_out, vol, False
+ 
+     def __del__(self):
+diff --git a/rvc/realtime/pipeline.py b/rvc/realtime/pipeline.py
+index 83505377..0e3ee85f 100644
+--- a/rvc/realtime/pipeline.py
++++ b/rvc/realtime/pipeline.py
+@@ -527,7 +527,9 @@ def create_pipeline(
+     )
+     big_tsr, _ = index.read_index_tensor()
+ 
+-    hubert_model = load_embedding(embedder_model, embedder_model_custom)
++    hubert_model = load_embedding(
++        embedder_model, embedder_model_custom, allow_fallback=False
++    )
+     hubert_model = hubert_model.to(vc.config.device).to(vc.dtype)
+     hubert_model.eval()
+ 
+diff --git a/rvc/realtime/worker.py b/rvc/realtime/worker.py
+index 7eba6422..e8b7f2e8 100644
+--- a/rvc/realtime/worker.py
++++ b/rvc/realtime/worker.py
+@@ -209,7 +209,7 @@ def _apply_config(vc: VoiceChanger, cfg):
+ 
+         old = vc.vc_model.pipeline.hubert_model
+         del old
+-        hubert_model = load_embedding(emb, emb_custom)
++        hubert_model = load_embedding(emb, emb_custom, allow_fallback=False)
+         hubert_model = hubert_model.to(vc.vc_model.device).float()
+         hubert_model.eval()
+         vc.vc_model.pipeline.hubert_model = hubert_model
+diff --git a/tabs/realtime/realtime.py b/tabs/realtime/realtime.py
+index 2254957e..fdc03694 100644
+--- a/tabs/realtime/realtime.py
++++ b/tabs/realtime/realtime.py
+@@ -7,12 +7,19 @@ import json
+ import regex as re
+ import shutil
+ import torch
++import threading
+ 
+ now_dir = os.getcwd()
+ sys.path.append(now_dir)
+ 
+ from rvc.realtime.callbacks import AudioCallbacks
+-from rvc.realtime.audio import list_audio_device, resolve_sample_rate
++from rvc.realtime.audio import (
++    list_audio_device,
++    resolve_sample_rate,
++    normalize_audio_device_name,
++    resolve_audio_device,
++    reinitialize_audio_backend as _reinitialize_audio_backend,
++)
+ from rvc.realtime.core import AUDIO_SAMPLE_RATE
+ 
+ from assets.i18n.i18n import I18nAuto
+@@ -311,6 +318,9 @@ interactive_false = gr.update(interactive=False, visible=False)
+ interactive_visible = gr.update(interactive=False, visible=True)
+ running, callbacks, audio_manager = False, None, None
+ callbacks_kwargs = {}
++_realtime_lock = threading.RLock()
++_start_generation = 0
++_starting = False
+ 
+ CONFIG_PATH = os.path.join(now_dir, "assets", "config.json")
+ 
+@@ -411,7 +421,12 @@ def get_safe_dropdown_value(saved_value, choices, fallback_value=None):
+     """Safely get a dropdown value, ensuring it exists in choices"""
+     if saved_value and saved_value in choices:
+         return saved_value
+-    elif fallback_value and fallback_value in choices:
++    if saved_value:
++        normalized = normalize_audio_device_name(saved_value).casefold()
++        for choice in choices:
++            if normalize_audio_device_name(choice).casefold() == normalized:
++                return choice
++    if fallback_value and fallback_value in choices:
+         return fallback_value
+     elif choices:
+         return choices[0]
+@@ -523,8 +538,10 @@ def start_realtime(
+     record_audio_path: str = None,
+     export_format: str = "WAV",
+ ):
+-    global running, callbacks, audio_manager, callbacks_kwargs
+-    running = True
++    global running, callbacks, audio_manager, callbacks_kwargs, _starting, _start_generation
++    if running:
++        yield "Realtime is already running. Stop it before starting again.", interactive_false, interactive_visible
++        return
+ 
+     if not input_audio_device or not output_audio_device:
+         yield (
+@@ -548,6 +565,16 @@ def start_realtime(
+         )
+         return
+ 
++    with _realtime_lock:
++        unavailable = running or _starting or callbacks is not None or audio_manager is not None
++        if not unavailable:
++            _starting = True
++            _start_generation += 1
++            request_generation = _start_generation
++    if unavailable:
++        yield "Realtime is starting or still has resources. Stop it before starting again.", interactive_false, interactive_true
++        return
++
+     print(f"Starting Realtime...")
+     yield i18n("Starting Realtime..."), interactive_false, interactive_visible
+ 
+@@ -558,31 +585,40 @@ def start_realtime(
+     monitor_audio_gain /= 100.0
+ 
+     try:
+-        input_devices, output_devices = get_audio_devices_formatted()
+-        input_device_id = input_devices[input_audio_device]
+-        output_device_id = output_devices[output_audio_device]
+-        output_monitor_id = (
+-            output_devices[monitor_output_device] if use_monitor_device else None
+-        )
+-    except (ValueError, IndexError):
+-        print(f"Error: incorrectly formatted audio device.")
++        with _realtime_lock:
++            if request_generation != _start_generation:
++                return
++            reinitialize_audio_backend(_start_token=request_generation)
++            input_device_id = resolve_audio_device(input_audio_device, "input").index
++            resolve_audio_device(output_audio_device, "output")
++            if use_monitor_device:
++                resolve_audio_device(monitor_output_device, "output")
++            # Keep numeric sample-rate lookup in the same protected inventory
++            # generation as device resolution. Public refresh cannot interrupt it.
++            _rt_cfg = load_realtime_settings()
++            asio_enabled = _rt_cfg["asio_enabled"]
++            audio_sample_rate = resolve_sample_rate(
++                input_device_id, asio_enabled, _rt_cfg["audio_sample_rate"]
++            )
++            if embedder_model == "custom":
++                if not embedder_model_custom or not os.path.isdir(embedder_model_custom):
++                    raise FileNotFoundError(
++                        f"Custom embedder directory is unavailable: {embedder_model_custom!r}. "
++                        "Select the Chinese HuBERT directory; Realtime will not substitute ContentVec."
++                    )
++    except Exception as error:
++        _release_realtime_resources(expected_generation=request_generation)
++        print(f"[Audio] Realtime preparation failed: {error}")
+         yield (
+-            i18n("Incorrectly formatted audio device. Stopping."),
++            str(error),
+             interactive_true,
+             interactive_false,
+         )
+         return
+ 
+-    # Load ASIO and sample rate settings from config.
+-    _rt_cfg = load_realtime_settings()
+-    asio_enabled = _rt_cfg["asio_enabled"]
+-    audio_sample_rate = _rt_cfg["audio_sample_rate"]
+-    audio_sample_rate = resolve_sample_rate(
+-        input_device_id, asio_enabled, audio_sample_rate
+-    )
+     block_frame = int(chunk_size * audio_sample_rate / 1000)
+ 
+-    callbacks_kwargs = {
++    start_kwargs = {
+         "pass_through": PASS_THROUGH,
+         "block_frame": block_frame,
+         "cross_fade_overlap_size": cross_fade_overlap_size,
+@@ -655,26 +691,34 @@ def start_realtime(
+         },
+     }
+ 
+-    callbacks = AudioCallbacks(**callbacks_kwargs)
+-
+-    audio_manager = callbacks.audio
+     try:
+-        audio_manager.start(
+-            input_device_id=input_device_id,
+-            output_device_id=output_device_id,
+-            output_monitor_id=output_monitor_id,
+-            exclusive_mode=exclusive_mode,
+-            asio_input_channel=input_asio_channels if asio_enabled else -1,
+-            asio_output_channel=output_asio_channels if asio_enabled else -1,
+-            asio_output_monitor_channel=monitor_asio_channels if asio_enabled else -1,
+-            block_frame=block_frame,
+-            audio_sample_rate=audio_sample_rate,
+-            asio_output_stereo=asio_output_stereo,
+-        )
++        with _realtime_lock:
++            if request_generation != _start_generation:
++                return
++            callbacks_kwargs = start_kwargs
++            callbacks = AudioCallbacks(**start_kwargs)
++            audio_manager = callbacks.audio
++            audio_manager.start(
++                input_device_id=input_audio_device,
++                output_device_id=output_audio_device,
++                output_monitor_id=monitor_output_device if use_monitor_device else None,
++                exclusive_mode=exclusive_mode,
++                asio_input_channel=input_asio_channels if asio_enabled else -1,
++                asio_output_channel=output_asio_channels if asio_enabled else -1,
++                asio_output_monitor_channel=monitor_asio_channels if asio_enabled else -1,
++                block_frame=block_frame,
++                audio_sample_rate=audio_sample_rate,
++                asio_output_stereo=asio_output_stereo,
++            )
++            running = True
++            _starting = False
+     except Exception as error:
+-        running = False
++        cleanup_errors = _release_realtime_resources(expected_generation=request_generation)
+         print(f"Realtime error: {error}")
+-        yield i18n("Error: {}").format(error), interactive_true, interactive_false
++        detail = str(error)
++        if cleanup_errors:
++            detail += "\n" + "; ".join(cleanup_errors)
++        yield i18n("Error: {}").format(detail), interactive_true, interactive_false
+         return
+ 
+     # print(f"Loading model...")
+@@ -703,14 +747,31 @@ def start_realtime(
+     print(f"Realtime is starting!")
+     yield i18n("Realtime is starting!"), interactive_false, interactive_visible
+ 
+-    warmup_total = 0
+-    while warmup_total == 0:
+-        warmup_total = callbacks.vc.vc_model.warmup_blocks
++    with _realtime_lock:
++        if request_generation != _start_generation:
++            return
++        warmup_total = max(callbacks.vc.vc_model.warmup_blocks, 1)
+ 
+     while running and callbacks is not None and audio_manager is not None:
+         time.sleep(0.1)
+-        if hasattr(audio_manager, "latency") and hasattr(audio_manager, "volume"):
+-            warmup_remaining = callbacks.vc.vc_model.warmup_blocks
++        with _realtime_lock:
++            if request_generation != _start_generation or callbacks is None or audio_manager is None:
++                break
++            worker_process = callbacks.vc._process
++            worker_dead = worker_process is None or not worker_process.is_alive()
++            has_metrics = hasattr(audio_manager, "latency") and hasattr(audio_manager, "volume")
++            if worker_dead:
++                cleanup_errors = _release_realtime_resources(expected_generation=request_generation)
++                if cleanup_errors:
++                    print("[Audio] " + "; ".join(cleanup_errors))
++            elif has_metrics:
++                warmup_remaining = callbacks.vc.vc_model.warmup_blocks
++                latency, volume = audio_manager.latency, audio_manager.volume
++        if worker_dead:
++            yield "Realtime model worker stopped. Check the console for the model/embedder error.", interactive_true, interactive_false
++            return
++        if has_metrics:
++            warmup_total = max(warmup_total, warmup_remaining)
+ 
+             if warmup_remaining > 0:
+                 bar = progress_str(warmup_remaining, warmup_total)
+@@ -722,7 +783,7 @@ def start_realtime(
+             else:
+                 yield (
+                     i18n("Latency: {:.2f} ms | Volume: {:.2f} dB").format(
+-                        audio_manager.latency, audio_manager.volume
++                        latency, volume
+                     ),
+                     interactive_false,
+                     interactive_true,
+@@ -817,17 +878,37 @@ def change_config(value, key, if_kwargs=False):
+         change_callbacks_config()
+ 
+ 
++def _release_realtime_resources(expected_generation=None):
++    """Release streams before the worker; retain references on cleanup failure."""
++    global running, callbacks, audio_manager, _starting, _start_generation
++    with _realtime_lock:
++        if expected_generation is not None and expected_generation != _start_generation:
++            return []
++        _start_generation += 1
++        _starting = running = False
++        errors = []
++        if audio_manager is not None:
++            try:
++                audio_manager.stop()
++            except Exception as error:
++                errors.append(f"Audio cleanup: {error}")
++        if callbacks is not None:
++            try:
++                callbacks.vc.stop()
++            except Exception as error:
++                errors.append(f"Worker cleanup: {error}")
++        if not errors:
++            audio_manager = callbacks = None
++        return errors
++
++
+ def stop_realtime():
+-    global running, callbacks, audio_manager
+-    if running and audio_manager is not None and callbacks is not None:
+-        audio_manager.stop()
+-        callbacks.vc.stop()
+-        running = False
+-        if hasattr(audio_manager, "latency"):
+-            del audio_manager.latency
+-        del audio_manager, callbacks
+-        audio_manager = callbacks = None
+-        time.sleep(0.1)
++    if _starting or audio_manager is not None or callbacks is not None:
++        errors = _release_realtime_resources()
++        if errors:
++            message = "; ".join(errors)
++            print(f"[Audio] {message}")
++            return message, interactive_false, interactive_true
+ 
+         print(f"Realtime stopped.")
+         return (
+@@ -857,19 +938,27 @@ def get_audio_devices_formatted():
+         )
+ 
+         input_device_list = {
+-            f"{input_sorted.index(d)+1}: {d.name} ({d.host_api})": d.index
++            d.label: d.index
+             for d in input_sorted
+         }
+         output_device_list = {
+-            f"{output_sorted.index(d)+1}: {d.name} ({d.host_api})": d.index
++            d.label: d.index
+             for d in output_sorted
+         }
+ 
+         return input_device_list, output_device_list
+-    except Exception:
++    except Exception as error:
++        print(f"[Audio] Error enumerating devices: {error}")
+         return {}, {}
+ 
+ 
++def reinitialize_audio_backend(*, _start_token=None):
++    with _realtime_lock:
++        if running or (_starting and _start_token != _start_generation):
++            raise RuntimeError("Stop Realtime before refreshing audio devices.")
++        _reinitialize_audio_backend()
++
++
+ def update_dropdowns_from_json(data):
+     if not data:
+         return [
+@@ -1772,8 +1861,10 @@ def realtime_tab():
+             ), gr.update(choices=new_sids, value=0 if new_sids else None)
+ 
+         def refresh_devices():
+-            sd._terminate()
+-            sd._initialize()
++            if running or _starting:
++                gr.Info("Stop Realtime before refreshing audio devices.")
++                return gr.update(), gr.update(), gr.update()
++            reinitialize_audio_backend()
+ 
+             input_choices, output_choices = get_audio_devices_formatted()
+             input_choices, output_choices = list(input_choices.keys()), list(

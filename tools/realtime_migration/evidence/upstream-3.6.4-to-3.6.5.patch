@@ -1,0 +1,586 @@
+diff --git a/rvc/lib/utils.py b/rvc/lib/utils.py
+index fe2321b5..a4eacd0c 100644
+--- a/rvc/lib/utils.py
++++ b/rvc/lib/utils.py
+@@ -1,6 +1,8 @@
+ import os
+ import sys
+ import soxr
++import torch
++import torchaudio
+ import librosa
+ import soundfile as sf
+ import numpy as np
+@@ -60,6 +62,28 @@ def load_audio(file, sample_rate):
+     return audio.flatten()
+ 
+ 
++def load_audio_ta(file, sample_rate):
++    try:
++        file = file.strip(" ").strip('"').strip("\n").strip('"').strip(" ")
++        audio, sr = sf.read(file)
++        audio = np.asarray(audio, dtype=np.float32)
++        if len(audio.shape) > 1:
++            audio = librosa.to_mono(audio.T)
++        if sr != sample_rate:
++            transform = torchaudio.transforms.Resample(
++                orig_freq=sr,
++                new_freq=sample_rate,
++                lowpass_filter_width=128,
++            )
++            audio = torch.from_numpy(audio).unsqueeze(0)
++            audio = transform(audio).squeeze(0).contiguous().numpy()
++
++    except Exception as error:
++        raise RuntimeError(f"An error occurred loading the audio: {error}")
++
++    return audio
++
++
+ def load_audio_infer(
+     file,
+     sample_rate,
+diff --git a/rvc/realtime/audio.py b/rvc/realtime/audio.py
+index e77054bd..06a99f81 100644
+--- a/rvc/realtime/audio.py
++++ b/rvc/realtime/audio.py
+@@ -183,8 +183,7 @@ class Audio:
+         )
+ 
+     def process_data_with_time(self, indata: np.ndarray):
+-        out_wav, vol, perf, _ = self.process_data(indata)
+-        performance_ms = perf[1]
++        out_wav, vol, performance_ms = self.process_data(indata)
+         # print(f"real-time voice conversion performance: {performance_ms:.2f} ms")
+         self.latency = performance_ms  # latency to display on the application interface
+         self.volume = vol
+@@ -341,7 +340,7 @@ class Audio:
+         asio_input_channel: int = 0,
+         asio_output_channel: int = 0,
+         asio_output_monitor_channel: int = 0,
+-        read_chunk_size: int = 192,
++        block_frame: int = 24576,
+         audio_sample_rate: int = AUDIO_SAMPLE_RATE,
+         asio_output_stereo: bool = True,
+     ):
+@@ -412,8 +411,6 @@ class Audio:
+                 )
+                 monitor_channels = 1
+ 
+-        block_frame = read_chunk_size * 128
+-
+         try:
+             self.run_audio_stream(
+                 block_frame,
+diff --git a/rvc/realtime/callbacks.py b/rvc/realtime/callbacks.py
+index 4ca1e887..8c438fad 100644
+--- a/rvc/realtime/callbacks.py
++++ b/rvc/realtime/callbacks.py
+@@ -13,7 +13,7 @@ class AudioCallbacks:
+     def __init__(
+         self,
+         pass_through: bool = False,
+-        read_chunk_size: int = 192,
++        block_frame: int = 24576,
+         cross_fade_overlap_size: float = 0.1,
+         extra_convert_size: float = 0.5,
+         model_path: str = None,
+@@ -53,7 +53,7 @@ class AudioCallbacks:
+         self._last_vol = 0
+ 
+         vc_kwargs = dict(
+-            read_chunk_size=read_chunk_size,
++            block_frame=block_frame,
+             cross_fade_overlap_size=cross_fade_overlap_size,
+             extra_convert_size=extra_convert_size,
+             model_path=model_path,
+@@ -108,7 +108,7 @@ class AudioCallbacks:
+     ):
+         if self.pass_through:
+             vol = float(np.sqrt(np.square(received_data).mean(dtype=np.float32)))
+-            return received_data, vol, [0, 0, 0], None
++            return received_data, vol, 0
+ 
+         params = dict(
+             f0_up_key=f0_up_key,
+@@ -127,13 +127,13 @@ class AudioCallbacks:
+             audio, vol, perf_ms, _warmup = result
+             self._last_output = audio
+             self._last_vol = vol
+-            return audio, vol, [0, perf_ms, 0], None
++            return audio, vol, perf_ms
+ 
+         # No result ready yet; replay previous output to avoid underrun.
+         if (
+             self._last_output is not None
+             and self._last_output.shape[0] == received_data.shape[0]
+         ):
+-            return self._last_output, self._last_vol, [0, 0, 0], None
++            return self._last_output, self._last_vol, 0
+ 
+-        return np.zeros(received_data.shape[0], dtype=np.float32), 0, [0, 0, 0], None
++        return np.zeros(received_data.shape[0], dtype=np.float32), 0, 0
+diff --git a/rvc/realtime/client.py b/rvc/realtime/client.py
+index 0299502c..a5dc445a 100644
+--- a/rvc/realtime/client.py
++++ b/rvc/realtime/client.py
+@@ -267,14 +267,13 @@ async def websocket_audio(ws: WebSocket):
+         text = await ws.receive_text()
+         params = json.loads(text)
+ 
+-        read_chunk_size = int(params["chunk_size"])
+-        block_frame = read_chunk_size * 128
++        block_frame = params["block_frame"]
+ 
+         print("Starting Realtime...")
+ 
+         if vc_instance is None:
+             vc_instance = VoiceChanger(
+-                read_chunk_size=read_chunk_size,
++                block_frame=block_frame,
+                 cross_fade_overlap_size=params["cross_fade_overlap_size"],
+                 extra_convert_size=params["extra_convert_size"],
+                 model_path=params["model_path"],
+diff --git a/rvc/realtime/core.py b/rvc/realtime/core.py
+index 53acfc4b..b18b1080 100644
+--- a/rvc/realtime/core.py
++++ b/rvc/realtime/core.py
+@@ -440,7 +440,7 @@ class Realtime:
+ class VoiceChanger:
+     def __init__(
+         self,
+-        read_chunk_size: int,
++        block_frame: int,
+         cross_fade_overlap_size: float,
+         extra_convert_size: float,
+         model_path: str = None,
+@@ -466,7 +466,7 @@ class VoiceChanger:
+         self.record_audio = record_audio
+         self.record_audio_path = record_audio_path
+         self.export_format = export_format
+-        self.block_frame = read_chunk_size * 128
++        self.block_frame = block_frame
+         self.crossfade_frame = int(cross_fade_overlap_size * AUDIO_SAMPLE_RATE)
+         self.extra_frame = int(extra_convert_size * AUDIO_SAMPLE_RATE)
+         self.sola_search_frame = AUDIO_SAMPLE_RATE // 100
+diff --git a/rvc/realtime/pipeline.py b/rvc/realtime/pipeline.py
+index 92e77b92..aefc07e6 100644
+--- a/rvc/realtime/pipeline.py
++++ b/rvc/realtime/pipeline.py
+@@ -164,6 +164,10 @@ class Realtime_Pipeline:
+                 device=self.device,
+                 sample_rate=self.sample_rate,
+                 hop_size=self.window,
++                # The high-register corrector is an offline two-pass method
++                # (numpy/librosa) and this path swaps infer_from_audio for a
++                # tensor-based variant, so it stays disabled here.
++                high_register={"enabled": False},
+             )
+ 
+             f0_model.model.cents_mapping = torch.from_numpy(
+diff --git a/rvc/realtime/worker.py b/rvc/realtime/worker.py
+index d268b409..7eba6422 100644
+--- a/rvc/realtime/worker.py
++++ b/rvc/realtime/worker.py
+@@ -242,7 +242,7 @@ class VoiceChangerWorker:
+         self.extra_frame = int(
+             vc_kwargs.get("extra_convert_size", 0.5) * AUDIO_SAMPLE_RATE
+         )
+-        self.block_frame = vc_kwargs.get("read_chunk_size", 192) * 128
++        self.block_frame = vc_kwargs.get("block_frame", 24576)
+         self.sola_search_frame = AUDIO_SAMPLE_RATE // 100
+         self.vc_model = _RealtimeState()
+ 
+diff --git a/tabs/realtime/main.js b/tabs/realtime/main.js
+index d9197c3b..923b7a5d 100644
+--- a/tabs/realtime/main.js
++++ b/tabs/realtime/main.js
+@@ -273,8 +273,7 @@ window.StreamAudioRealtime = async function (
+   delay_mix,
+ ) {
+   const SampleRate = 48000;
+-  const ReadChunkSize = Math.round((chunk_size * SampleRate) / 1000 / 128);
+-  const block_frame = parseInt(ReadChunkSize) * 128;
++  const block_frame = parseInt(Math.round((chunk_size * SampleRate) / 1000));
+   const ButtonState = { start_button: true, stop_button: false };
+ 
+   if (!terms_checkbox) {
+@@ -389,7 +388,7 @@ window.StreamAudioRealtime = async function (
+       ws.send(
+         JSON.stringify({
+           type: "init",
+-          chunk_size: ReadChunkSize,
++          block_frame: block_frame,
+           cross_fade_overlap_size: cross_fade_overlap_size,
+           extra_convert_size: extra_convert_size,
+           model_path: model_file,
+diff --git a/tabs/realtime/realtime.py b/tabs/realtime/realtime.py
+index e8051b69..cf8184b1 100644
+--- a/tabs/realtime/realtime.py
++++ b/tabs/realtime/realtime.py
+@@ -101,6 +101,30 @@ def get_files(type="model"):
+     return [t[2] for t in sorted(best.values(), key=lambda x: x[1])]
+ 
+ 
++def display_name(path):
++    """Dropdown label for a path: the file or folder name, without extension."""
++    return os.path.splitext(os.path.basename(path))[0]
++
++
++def path_choices(paths):
++    """
++    Convert a list of paths into (label, value) dropdown choices so only the
++    file name is displayed and announced instead of the full relative path.
++    The order of `paths` is preserved, and duplicate names are disambiguated
++    by appending the parent folder name.
++    """
++    names = [display_name(path) for path in paths]
++    counts = {}
++    for name in names:
++        counts[name] = counts.get(name, 0) + 1
++    choices = []
++    for name, path in zip(names, paths):
++        if counts[name] > 1:
++            name = f"{name} ({os.path.basename(os.path.dirname(path))})"
++        choices.append((name, path))
++    return choices
++
++
+ def folders_same(
+     a: str, b: str
+ ) -> bool:  # Used to "pair" index and model folders based on path names
+@@ -504,28 +528,28 @@ def start_realtime(
+ 
+     if not input_audio_device or not output_audio_device:
+         yield (
+-            "Please select valid input/output devices!",
++            i18n("Please select valid input/output devices!"),
+             interactive_true,
+             interactive_false,
+         )
+         return
+     if use_monitor_device and not monitor_output_device:
+         yield (
+-            "Please select a valid monitor device!",
++            i18n("Please select a valid monitor device!"),
+             interactive_true,
+             interactive_false,
+         )
+         return
+     if not pth_path:
+         yield (
+-            "Model path not provided. Aborting conversion.",
++            i18n("Model path not provided. Aborting conversion."),
+             interactive_true,
+             interactive_false,
+         )
+         return
+ 
+     print(f"Starting Realtime...")
+-    yield "Starting Realtime...", interactive_false, interactive_visible
++    yield i18n("Starting Realtime..."), interactive_false, interactive_visible
+ 
+     sid = int(sid) if sid is not None else 0
+ 
+@@ -542,7 +566,11 @@ def start_realtime(
+         )
+     except (ValueError, IndexError):
+         print(f"Error: incorrectly formatted audio device.")
+-        yield "Incorrectly formatted audio device. Stopping.", interactive_true, interactive_false
++        yield (
++            i18n("Incorrectly formatted audio device. Stopping."),
++            interactive_true,
++            interactive_false,
++        )
+         return
+ 
+     # Load ASIO and sample rate settings from config.
+@@ -552,11 +580,11 @@ def start_realtime(
+     audio_sample_rate = resolve_sample_rate(
+         input_device_id, asio_enabled, audio_sample_rate
+     )
+-    read_chunk_size = int(chunk_size * audio_sample_rate / 1000 / 128)
++    block_frame = int(chunk_size * audio_sample_rate / 1000)
+ 
+     callbacks_kwargs = {
+         "pass_through": PASS_THROUGH,
+-        "read_chunk_size": read_chunk_size,
++        "block_frame": block_frame,
+         "cross_fade_overlap_size": cross_fade_overlap_size,
+         "extra_convert_size": extra_convert_size,
+         "model_path": pth_path,
+@@ -639,14 +667,14 @@ def start_realtime(
+             asio_input_channel=input_asio_channels if asio_enabled else -1,
+             asio_output_channel=output_asio_channels if asio_enabled else -1,
+             asio_output_monitor_channel=monitor_asio_channels if asio_enabled else -1,
+-            read_chunk_size=read_chunk_size,
++            block_frame=block_frame,
+             audio_sample_rate=audio_sample_rate,
+             asio_output_stereo=asio_output_stereo,
+         )
+     except Exception as error:
+         running = False
+         print(f"Realtime error: {error}")
+-        yield "Error: " + str(error), interactive_true, interactive_false
++        yield i18n("Error: {}").format(error), interactive_true, interactive_false
+         return
+ 
+     # print(f"Loading model...")
+@@ -672,33 +700,33 @@ def start_realtime(
+     #         last_report = elapsed
+     #         print(f"Loading model... ({elapsed}s)")
+ 
+-    print(f"Realtime is ready!")
+-    yield "Realtime is ready!", interactive_false, interactive_visible
++    print(f"Realtime is starting!")
++    yield i18n("Realtime is starting!"), interactive_false, interactive_visible
++
++    warmup_total = 0
++    while warmup_total == 0:
++        warmup_total = callbacks.vc.vc_model.warmup_blocks
+ 
+     while running and callbacks is not None and audio_manager is not None:
+         time.sleep(0.1)
+         if hasattr(audio_manager, "latency") and hasattr(audio_manager, "volume"):
+-            warmup_remaining = (
+-                callbacks.vc.vc_model.warmup_blocks
+-                if callbacks is not None
+-                and hasattr(callbacks, "vc")
+-                and hasattr(callbacks.vc, "vc_model")
+-                and hasattr(callbacks.vc.vc_model, "warmup_blocks")
+-                else 0
+-            )
+-            warmup_total = (
+-                callbacks.vc.vc_model.warmup_blocks_total
+-                if callbacks is not None
+-                and hasattr(callbacks, "vc")
+-                and hasattr(callbacks.vc, "vc_model")
+-                and hasattr(callbacks.vc.vc_model, "warmup_blocks_total")
+-                else warmup_remaining
+-            )
++            warmup_remaining = callbacks.vc.vc_model.warmup_blocks
++
+             if warmup_remaining > 0:
+                 bar = progress_str(warmup_remaining, warmup_total)
+-                yield f"Warming up... ({warmup_remaining} blocks) {bar}", interactive_false, interactive_true
++                yield (
++                    i18n("Warming up... ({} blocks) {}").format(warmup_remaining, bar),
++                    interactive_false,
++                    interactive_true,
++                )
+             else:
+-                yield f"Latency: {audio_manager.latency:.2f} ms | Volume: {audio_manager.volume:.2f} dB", interactive_false, interactive_true
++                yield (
++                    i18n("Latency: {:.2f} ms | Volume: {:.2f} dB").format(
++                        audio_manager.latency, audio_manager.volume
++                    ),
++                    interactive_false,
++                    interactive_true,
++                )
+ 
+     return (
+         i18n("Realtime stopped."),
+@@ -714,7 +742,7 @@ def change_callbacks_config():
+         # print(callbacks_kwargs)
+ 
+         # It will need to create a new stream to work.
+-        # callbacks.vc.block_frame = callbacks_kwargs.get("read_chunk_size", 192) * 128
++        # callbacks.vc.block_frame = callbacks_kwargs.get("block_frame", 192)
+         crossfade_frame = int(
+             callbacks_kwargs.get("cross_fade_overlap_size", 0.1) * AUDIO_SAMPLE_RATE
+         )
+@@ -803,12 +831,12 @@ def stop_realtime():
+ 
+         print(f"Realtime stopped.")
+         return (
+-            "Realtime stopped.",
++            i18n("Realtime stopped."),
+             interactive_true,
+             interactive_false,
+         )
+     else:
+-        return "Realtime pipeline not found!", interactive_true, interactive_false
++        return i18n("Realtime pipeline not found!"), interactive_true, interactive_false
+ 
+ 
+ def get_audio_devices_formatted():
+@@ -896,7 +924,7 @@ def soundfile_record_audio(
+ 
+     if running and audio_manager is not None and callbacks is not None:
+         if record_button == "Start":
+-            gr.Info("Start recording...")
++            gr.Info(i18n("Start recording..."))
+ 
+             if not record_audio_path:
+                 record_audio_path = os.path.join(
+@@ -913,13 +941,13 @@ def soundfile_record_audio(
+ 
+             return "Stop", None
+         else:
+-            gr.Info("Stop recording!")
++            gr.Info(i18n("Stop recording!"))
+ 
+             callbacks.vc.send_config({"record_stop": True})
+ 
+             return "Start", record_audio_path
+ 
+-    gr.Warning("Realtime pipeline not found!")
++    gr.Warning(i18n("Realtime pipeline not found!"))
+     return "Start", None
+ 
+ 
+@@ -1141,13 +1169,14 @@ def realtime_tab():
+                     )
+ 
+             with gr.TabItem(i18n("Model Settings")):
++                gr.Markdown(value=i18n("## Model Selection"))
+                 with gr.Row():
+                     model_choices = (
+                         sorted(names, key=extract_model_and_epoch) if names else []
+                     )
+                     model_file = gr.Dropdown(
+                         label=i18n("Voice Model"),
+-                        choices=model_choices,
++                        choices=path_choices(model_choices),
+                         interactive=True,
+                         value=get_safe_dropdown_value(
+                             saved_settings["model_file"], model_choices, default_weight
+@@ -1157,7 +1186,7 @@ def realtime_tab():
+                     index_choices = sorted(get_files("index"))
+                     index_file = gr.Dropdown(
+                         label=i18n("Index File"),
+-                        choices=index_choices,
++                        choices=path_choices(index_choices),
+                         value=get_safe_index_value(
+                             saved_settings["index_file"],
+                             index_choices,
+@@ -1169,8 +1198,9 @@ def realtime_tab():
+ 
+                 with gr.Row():
+                     unload_button = gr.Button(i18n("Unload Voice"))
+-                    refresh_button = gr.Button(i18n("Refresh"))
++                    refresh_button = gr.Button(i18n("Refresh models and indexes"))
+                 with gr.Column():
++                    gr.Markdown(value=i18n("## Advanced Settings"))
+                     autotune = gr.Checkbox(
+                         label=i18n("Autotune"),
+                         info=i18n(
+@@ -1612,7 +1642,7 @@ def realtime_tab():
+                             with gr.Row():
+                                 embedder_model_custom = gr.Dropdown(
+                                     label=i18n("Select Custom Embedder"),
+-                                    choices=refresh_embedders_folders(),
++                                    choices=path_choices(refresh_embedders_folders()),
+                                     interactive=True,
+                                     allow_custom_value=True,
+                                 )
+@@ -1689,12 +1719,42 @@ def realtime_tab():
+ 
+         def enforce_terms(terms_accepted, *args):
+             if not terms_accepted:
+-                message = "You must agree to the Terms of Use to proceed."
++                message = i18n("You must agree to the Terms of Use to proceed.")
+                 gr.Info(message)
+                 yield message, interactive_true, interactive_false
+                 return
+             yield from start_realtime(*args)
+ 
++        def _realtime_with_toast(terms_accepted, *args):
++            if not terms_accepted:
++                # enforce_terms explains the rejection with its own toast.
++                yield from enforce_terms(terms_accepted, *args)
++                return
++            gr.Info(i18n("Starting real-time conversion..."))
++            # start_realtime reports failures as yielded status strings
++            # instead of raising, so warn about them for screen reader
++            # users. The status text is translated, so failures are
++            # detected structurally instead of by matching English words:
++            # every failure yield re-enables the start button, while
++            # progress updates keep it disabled.
++            try:
++                for update in enforce_terms(terms_accepted, *args):
++                    status = update[0] if isinstance(update, tuple) else update
++                    if (
++                        isinstance(update, tuple)
++                        and len(update) > 1
++                        and update[1] is interactive_true
++                    ):
++                        gr.Warning(status)
++                    yield update
++            except Exception:
++                gr.Warning(
++                    i18n(
++                        "An error occurred during real-time conversion. Please check the console logs for more details."
++                    )
++                )
++                raise
++
+         def update_on_model_change(model_path):
+             new_index = match_index(model_path)
+             new_sids = get_speakers_id(model_path)
+@@ -1708,7 +1768,7 @@ def realtime_tab():
+             )
+ 
+             return gr.update(
+-                choices=new_index_choices, value=safe_index_value
++                choices=path_choices(new_index_choices), value=safe_index_value
+             ), gr.update(choices=new_sids, value=0 if new_sids else None)
+ 
+         def refresh_devices():
+@@ -1801,7 +1861,7 @@ def realtime_tab():
+             outputs=[],
+         )
+         refresh_embedders_button.click(
+-            fn=lambda: gr.update(choices=refresh_embedders_folders()),
++            fn=lambda: gr.update(choices=path_choices(refresh_embedders_folders())),
+             inputs=[],
+             outputs=[embedder_model_custom],
+         )
+@@ -2006,7 +2066,7 @@ def realtime_tab():
+             )
+         else:
+             start_button.click(
+-                fn=enforce_terms,
++                fn=_realtime_with_toast,
+                 inputs=[
+                     terms_checkbox,
+                     input_audio_device,
+@@ -2179,8 +2239,12 @@ def realtime_tab():
+                 new_names = get_files("model")
+                 new_indexes = sorted(get_files("index"))
+                 return (
+-                    gr.update(choices=sorted(new_names, key=extract_model_and_epoch)),
+-                    gr.update(choices=new_indexes),
++                    gr.update(
++                        choices=path_choices(
++                            sorted(new_names, key=extract_model_and_epoch)
++                        )
++                    ),
++                    gr.update(choices=path_choices(new_indexes)),
+                 )
+ 
+             refresh_button.click(
+@@ -2200,8 +2264,12 @@ def realtime_tab():
+                     output_choices.keys()
+                 )
+                 return (
+-                    gr.update(choices=sorted(new_names, key=extract_model_and_epoch)),
+-                    gr.update(choices=new_indexes),
++                    gr.update(
++                        choices=path_choices(
++                            sorted(new_names, key=extract_model_and_epoch)
++                        )
++                    ),
++                    gr.update(choices=path_choices(new_indexes)),
+                     gr.update(choices=input_choices),
+                     gr.update(choices=output_choices),
+                     gr.update(choices=output_choices),
+@@ -2388,7 +2456,7 @@ def realtime_tab():
+             outputs=[],
+         )
+ 
+-        # chunk_size.change(fn=lambda value: change_config(int(value * AUDIO_SAMPLE_RATE / 1000 / 128) if not client_mode else None, "read_chunk_size"), inputs=[chunk_size], outputs=[])
++        # chunk_size.change(fn=lambda value: change_config(int(value * AUDIO_SAMPLE_RATE / 1000) if not client_mode else None, "block_frame"), inputs=[chunk_size], outputs=[])
+ 
+         pitch.change(
+             js=(

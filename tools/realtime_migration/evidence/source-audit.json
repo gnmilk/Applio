@@ -1,0 +1,15 @@
+{
+  "refs": {
+    "3.6.4": "da174445ec98d15d006175ac99db3879bd3a73d1",
+    "3.6.5": "55fe0b976a6990bb75261c32ccecf6bfca3198f1",
+    "HEAD": "bfb9e0e5e192e08885da984a62e78e872153fbda"
+  },
+  "old_root": "E:\\AiVoice\\Applio_3.6.4_broken",
+  "old_changed_source": [
+    "rvc/realtime/audio.py",
+    "rvc/realtime/core.py",
+    "tabs/realtime/realtime.py"
+  ],
+  "initial_status": "?? tools/\n",
+  "new_config_sha256": "44a1df983d3b115e557ef97b105731001ca3d6c8cc9db191d4eb55aa6da8eb3a"
+}

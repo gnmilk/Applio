@@ -1,0 +1,50 @@
+test_different_custom_path_reloads_and_same_path_reuses (tools.realtime_migration.test_custom_embedder.CacheTests.test_different_custom_path_reloads_and_same_path_reuses) ... ok
+test_missing_custom_embedder_never_falls_back_in_realtime (tools.realtime_migration.test_custom_embedder.CustomLoaderTests.test_missing_custom_embedder_never_falls_back_in_realtime) ... ok
+test_backend_resolves_after_refresh_validates_and_cleans_partial_open (tools.realtime_migration.test_audio_devices.DeviceTests.test_backend_resolves_after_refresh_validates_and_cleans_partial_open) ... [Audio] output: VAIO (Windows WASAPI); index=73; channels=2/2; default_sr=48000; stream_sr=48000; block_frame=12000; float32; attempt=1
+[Audio] input: AM350 (Windows WASAPI); index=41; channels=2/2; default_sr=48000; stream_sr=48000; block_frame=12000; float32; attempt=1
+[Audio] Validation/open failed: AM350 (Windows WASAPI) -> VAIO (Windows WASAPI): simulated driver refused start
+[Audio] output: VAIO (Windows WASAPI); index=73; channels=2/2; default_sr=48000; stream_sr=48000; block_frame=12000; float32; attempt=2
+[Audio] input: AM350 (Windows WASAPI); index=41; channels=2/2; default_sr=48000; stream_sr=48000; block_frame=12000; float32; attempt=2
+[Audio] Validation/open failed: AM350 (Windows WASAPI) -> VAIO (Windows WASAPI): simulated driver refused start
+ok
+test_empty_output_queue_does_not_block_callback (tools.realtime_migration.test_audio_devices.DeviceTests.test_empty_output_queue_does_not_block_callback) ... ok
+test_fallback_alias_is_revalidated_after_refresh (tools.realtime_migration.test_audio_devices.DeviceTests.test_fallback_alias_is_revalidated_after_refresh) ... [Audio] output: Speakers (Very Long USB Device Name A) (Windows WASAPI); index=2; channels=2/2; default_sr=48000; stream_sr=48000; block_frame=12000; float32; attempt=1
+[Audio] input: AM350 (Windows WASAPI); index=1; channels=2/2; default_sr=48000; stream_sr=48000; block_frame=12000; float32; attempt=1
+[Audio] Validation/open failed: AM350 (Windows WASAPI) -> Speakers (Very Long USB Device Name A) (Windows WASAPI): primary unavailable
+[Audio] output: Speakers (Very Long USB Device Name A) (Windows WASAPI); index=2; channels=2/2; default_sr=48000; stream_sr=48000; block_frame=12000; float32; attempt=2
+[Audio] input: AM350 (Windows WASAPI); index=1; channels=2/2; default_sr=48000; stream_sr=48000; block_frame=12000; float32; attempt=2
+[Audio] Validation/open failed: AM350 (Windows WASAPI) -> Speakers (Very Long USB Device Name A) (Windows WASAPI): primary unavailable
+[Audio] Validation/open failed: AM350 (Windows WASAPI) -> Speakers (Very Long USB Device (MME): Fallback identity became ambiguous or unavailable: Speakers (Very Long USB Device (MME)
+ok
+test_legacy_label_resolves_current_index_and_host_api (tools.realtime_migration.test_audio_devices.DeviceTests.test_legacy_label_resolves_current_index_and_host_api) ... ok
+test_mme_shortened_alias_must_identify_a_unique_source (tools.realtime_migration.test_audio_devices.DeviceTests.test_mme_shortened_alias_must_identify_a_unique_source) ... ok
+test_monitor_constructor_opens_before_input (tools.realtime_migration.test_audio_devices.DeviceTests.test_monitor_constructor_opens_before_input) ... ok
+test_public_refresh_refuses_start_in_progress_under_lock (tools.realtime_migration.test_audio_devices.DeviceTests.test_public_refresh_refuses_start_in_progress_under_lock) ... ok
+test_refresh_refuses_active_realtime (tools.realtime_migration.test_audio_devices.DeviceTests.test_refresh_refuses_active_realtime) ... ok
+test_ui_labels_and_saved_legacy_values_are_stable (tools.realtime_migration.test_audio_devices.DeviceTests.test_ui_labels_and_saved_legacy_values_are_stable) ... ok
+test_unavailable_or_ambiguous_endpoint_is_not_guessed (tools.realtime_migration.test_audio_devices.DeviceTests.test_unavailable_or_ambiguous_endpoint_is_not_guessed) ... ok
+test_dead_model_worker_yields_error_without_busy_waiting_on_zero_warmup (tools.realtime_migration.test_lifecycle.LifecycleTests.test_dead_model_worker_yields_error_without_busy_waiting_on_zero_warmup) ... Starting Realtime...
+Realtime is starting!
+ok
+test_stop_cancels_a_start_paused_at_first_ui_yield (tools.realtime_migration.test_lifecycle.LifecycleTests.test_stop_cancels_a_start_paused_at_first_ui_yield) ... Starting Realtime...
+Realtime stopped.
+ok
+test_stop_during_stream_open_leaves_consistent_stopped_state (tools.realtime_migration.test_lifecycle.LifecycleTests.test_stop_during_stream_open_leaves_consistent_stopped_state) ... Starting Realtime...
+Realtime is starting!
+Realtime stopped.
+ok
+test_stop_releases_failed_start_resources_even_when_running_is_false (tools.realtime_migration.test_lifecycle.LifecycleTests.test_stop_releases_failed_start_resources_even_when_running_is_false) ... Realtime stopped.
+ok
+test_stream_close_error_does_not_skip_worker_stop (tools.realtime_migration.test_lifecycle.LifecycleTests.test_stream_close_error_does_not_skip_worker_stop) ... [Audio] Audio cleanup: driver refused close
+ok
+test_normal_speech_keeps_model_amplitude (tools.realtime_migration.test_volume.VolumeTests.test_normal_speech_keeps_model_amplitude) ... ok
+test_silent_block_clears_crossfade_residue (tools.realtime_migration.test_volume.VolumeTests.test_silent_block_clears_crossfade_residue) ... ok
+test_vad_threshold_and_warmup_keep_silence (tools.realtime_migration.test_volume.VolumeTests.test_vad_threshold_and_warmup_keep_silence) ... ok
+test_longer_chunk_stays_at_its_start (rvc.lib.tools.test_split_audio.MergeAudioTests.test_longer_chunk_stays_at_its_start) ... ok
+test_next_chunk_stays_on_time (rvc.lib.tools.test_split_audio.MergeAudioTests.test_next_chunk_stays_on_time) ... ok
+test_shorter_chunk_still_fills_its_slot (rvc.lib.tools.test_split_audio.MergeAudioTests.test_shorter_chunk_still_fills_its_slot) ... ok
+
+----------------------------------------------------------------------
+Ran 23 tests in 0.059s
+
+OK

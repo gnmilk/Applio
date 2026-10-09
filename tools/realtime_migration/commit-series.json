@@ -1,0 +1,12 @@
+{
+  "base": "bfb9e0e5e192e08885da984a62e78e872153fbda",
+  "branch": "Self-3.6.5",
+  "authorization": "User explicitly requested multiple logically separated commits and execution",
+  "commits": [
+    {"title": "fix(realtime): remove duplicate output RMS attenuation", "files": ["rvc/realtime/core.py", "tools/realtime_migration/test_volume.py"], "validation": "VolumeTests: speech amplitude, VAD/threshold/warmup silence, crossfade residue"},
+    {"title": "fix(realtime): stabilize device resolution and stream lifecycle", "files": ["rvc/realtime/audio.py", "tabs/realtime/realtime.py", "tools/realtime_migration/test_audio_devices.py", "tools/realtime_migration/test_lifecycle.py", "tools/realtime_migration/test_helpers.py"], "validation": "DeviceTests and LifecycleTests", "scope_note": "The UI custom-directory preflight belongs to startup input validation; strict loader behavior is committed separately"},
+    {"title": "fix(realtime): reject unavailable custom embedders", "files": ["rvc/lib/utils.py", "rvc/realtime/pipeline.py", "rvc/realtime/worker.py", "rvc/realtime/client.py", "tools/realtime_migration/test_custom_embedder.py"], "validation": "CustomLoaderTests and CacheTests"},
+    {"title": "chore(realtime): preserve migration evidence and verification tools", "files": ["tools/realtime_migration"], "validation": "Full safe verification: imports, in-memory compile, preservation checks and all 23 tests"}
+  ],
+  "constraints": ["Do not reset, stash, amend or rewrite existing history", "Abort if unrelated changes are already staged", "Do not push", "No physical audio or GPU tests after the WDF_VIOLATION incident"]
+}
