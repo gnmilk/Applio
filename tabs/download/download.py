@@ -15,6 +15,7 @@ sys.path.append(now_dir)
 
 from core import run_download_script
 from rvc.lib.utils import format_title
+from tabs.ui_settings import remember_page
 
 from assets.i18n.i18n import I18nAuto
 
@@ -164,10 +165,11 @@ def download_pretrained_model(model, sample_rate, url_g="", url_d=""):
     print("Pretrained model downloaded successfully!")
 
 
-def update_sample_rate_dropdown(model):
+def update_sample_rate_dropdown(model, current_rate=None):
+    rates = get_pretrained_sample_rates(model) if model else []
     return {
-        "choices": get_pretrained_sample_rates(model),
-        "value": get_pretrained_sample_rates(model)[0],
+        "choices": rates,
+        "value": current_rate if current_rate in rates else (rates[0] if rates else None),
         "__type__": "update",
     }
 
@@ -262,7 +264,7 @@ def download_tab():
 
         pretrained_model.change(
             update_sample_rate_dropdown,
-            inputs=[pretrained_model],
+            inputs=[pretrained_model, pretrained_sample_rate],
             outputs=[pretrained_sample_rate],
         )
 
@@ -280,3 +282,11 @@ def download_tab():
             inputs=[use_custom, pretrained_model, pretrained_sample_rate, url_g, url_d],
             outputs=[],
         )
+
+    remember_page(
+        "download", locals(), text_fields={"model_link", "url_g", "url_d"},
+        context_fields=("pretrained_model",),
+        choice_providers={"pretrained_sample_rate": lambda values:
+                          get_pretrained_sample_rates(values["pretrained_model"]) if values["pretrained_model"] else []},
+        visibility=lambda values: {"default": not values["use_custom"], "custom": values["use_custom"]},
+    )
