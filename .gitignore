@@ -27,3 +27,6 @@ env
 venv
 .venv
 
+# Realtime 本機量測產物與私人參數
+tools/realtime_optimization/runs/
+tools/realtime_optimization/*.local.json

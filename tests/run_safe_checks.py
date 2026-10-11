@@ -21,6 +21,7 @@ def main():
     config_before = hashlib.sha256(config_path.read_bytes()).hexdigest()
     tracked = subprocess.check_output(["git", "ls-files", "*.py"], cwd=ROOT).decode().splitlines()
     new_sources = ["tabs/ui_settings.py"] + [p.relative_to(ROOT).as_posix() for p in (ROOT / "tests").glob("*.py")]
+    new_sources += [p.relative_to(ROOT).as_posix() for p in (ROOT / "tools/realtime_optimization").glob("*.py")]
     sources = sorted(set(tracked + new_sources))
     for rel in sources:
         compile((ROOT / rel).read_text(encoding="utf-8-sig"), rel, "exec")
