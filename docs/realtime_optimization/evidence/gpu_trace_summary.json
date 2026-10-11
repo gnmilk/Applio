@@ -1,0 +1,173 @@
+{
+  "description": "短段 trace 診斷，透過 External id 連至 CPU op，再歸屬最內層 instrumentation scope；排除 13 startup chunks。",
+  "normal_performance": false,
+  "trace_bytes": 258282783,
+  "steady_chunks": 19,
+  "stages": {
+    "audio_buffer_write": {
+      "observed_chunks": 19,
+      "mean_kernel_ms": 0.0,
+      "mean_kernel_count": 0.0,
+      "mean_memcpy_ms": 0.0064960526315789476,
+      "mean_memcpy_bytes": 347991.5789473684,
+      "kernel_ms": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      }
+    },
+    "chunk_total": {
+      "observed_chunks": 19,
+      "mean_kernel_ms": 0.07337557894736842,
+      "mean_kernel_count": 5.7368421052631575,
+      "mean_memcpy_ms": 0.007910684210526315,
+      "mean_memcpy_bytes": 63671.68421052631,
+      "kernel_ms": {
+        "p50": 0.011744,
+        "p95": 0.13034489999999752,
+        "p99": 0.9815065800000005
+      }
+    },
+    "content_encoder": {
+      "observed_chunks": 19,
+      "mean_kernel_ms": 22.984435421052634,
+      "mean_kernel_count": 248.0,
+      "mean_memcpy_ms": 0.0,
+      "mean_memcpy_bytes": 0.0,
+      "kernel_ms": {
+        "p50": 22.66439699999997,
+        "p95": 32.871009200000024,
+        "p99": 33.41509304
+      }
+    },
+    "conversion": {
+      "observed_chunks": 19,
+      "mean_kernel_ms": 0.01591357894736842,
+      "mean_kernel_count": 9.0,
+      "mean_memcpy_ms": 0.006201315789473685,
+      "mean_memcpy_bytes": 439544.0,
+      "kernel_ms": {
+        "p50": 0.015903999999999998,
+        "p95": 0.016448,
+        "p99": 0.0166784
+      }
+    },
+    "f0": {
+      "observed_chunks": 19,
+      "mean_kernel_ms": 3.901854736842108,
+      "mean_kernel_count": 832.0,
+      "mean_memcpy_ms": 0.0009331052631578948,
+      "mean_memcpy_bytes": 46080.0,
+      "kernel_ms": {
+        "p50": 3.4944379999999993,
+        "p95": 5.071341300000008,
+        "p99": 5.769801060000001
+      }
+    },
+    "generator": {
+      "observed_chunks": 19,
+      "mean_kernel_ms": 5.005285052631581,
+      "mean_kernel_count": 1043.0,
+      "mean_memcpy_ms": 0.02898510526315789,
+      "mean_memcpy_bytes": 3985328.0,
+      "kernel_ms": {
+        "p50": 4.806500000000004,
+        "p95": 6.014079100000008,
+        "p99": 6.0552926200000075
+      }
+    },
+    "index_retrieval": {
+      "observed_chunks": 19,
+      "mean_kernel_ms": 0.218447,
+      "mean_kernel_count": 21.0,
+      "mean_memcpy_ms": 0.0009380526315789473,
+      "mean_memcpy_bytes": 49152.0,
+      "kernel_ms": {
+        "p50": 0.126784,
+        "p95": 0.43375379999999697,
+        "p99": 1.4610771600000003
+      }
+    },
+    "input_resample": {
+      "observed_chunks": 19,
+      "mean_kernel_ms": 0.005349157894736841,
+      "mean_kernel_count": 2.0,
+      "mean_memcpy_ms": 0.0011855789473684212,
+      "mean_memcpy_bytes": 48000.0,
+      "kernel_ms": {
+        "p50": 0.005312000000000001,
+        "p95": 0.005663999999999999,
+        "p99": 0.005664
+      }
+    },
+    "output_resample": {
+      "observed_chunks": 18,
+      "mean_kernel_ms": 0.005299500000000001,
+      "mean_kernel_count": 3.0,
+      "mean_memcpy_ms": 0.0009689999999999998,
+      "mean_memcpy_bytes": 51200.0,
+      "kernel_ms": {
+        "p50": 0.005312,
+        "p95": 0.0055728,
+        "p99": 0.00559456
+      }
+    },
+    "phase_vocoder": {
+      "observed_chunks": 18,
+      "mean_kernel_ms": 0.09061833333333334,
+      "mean_kernel_count": 41.0,
+      "mean_memcpy_ms": 0.0021245555555555553,
+      "mean_memcpy_bytes": 14404.0,
+      "kernel_ms": {
+        "p50": 0.09049750000000001,
+        "p95": 0.09205875,
+        "p99": 0.09421095
+      }
+    },
+    "realtime_frontend": {
+      "observed_chunks": 19,
+      "mean_kernel_ms": 0.005219105263157894,
+      "mean_kernel_count": 3.0526315789473686,
+      "mean_memcpy_ms": 0.0068632105263157885,
+      "mean_memcpy_bytes": 64004.0,
+      "kernel_ms": {
+        "p50": 0.005215,
+        "p95": 0.005436799999999998,
+        "p99": 0.00610496
+      }
+    },
+    "sola_correlation": {
+      "observed_chunks": 18,
+      "mean_kernel_ms": 13.798283222222222,
+      "mean_kernel_count": 8.0,
+      "mean_memcpy_ms": 0.0,
+      "mean_memcpy_bytes": 0.0,
+      "kernel_ms": {
+        "p50": 13.9890325,
+        "p95": 16.96719505,
+        "p99": 17.46943421
+      }
+    },
+    "volume_envelope": {
+      "observed_chunks": 19,
+      "mean_kernel_ms": 0.028503052631578946,
+      "mean_kernel_count": 19.0,
+      "mean_memcpy_ms": 0.0023427894736842104,
+      "mean_memcpy_bytes": 71040.0,
+      "kernel_ms": {
+        "p50": 0.028480000000000002,
+        "p95": 0.029255299999999998,
+        "p99": 0.02930066
+      }
+    }
+  },
+  "sync_count": {
+    "cudaStreamSynchronize": 166,
+    "cudaDeviceSynchronize": 20
+  },
+  "sync_host_total_ms": {
+    "cudaStreamSynchronize": 1679.4974,
+    "cudaDeviceSynchronize": 1.1653
+  },
+  "limitations": "包含 profiler、Events／每塊診斷同步和背景 GPU contention；不是正常 latency。Kernel duration 可受 contention，並行 stream sum 不是 wall time；residual 是最內層未細分 scope。"
+}

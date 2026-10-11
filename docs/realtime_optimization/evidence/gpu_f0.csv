@@ -1,0 +1,3 @@
+﻿signal,frames,jointly_voiced_frames,voicing_agreement,median_abs_cents_error,slope_direction_agreement,pitch_shift_semitones,limitations
+offline,1693,1039,0.9669226225634967,6.0054079070411035,0.8582755203171457,9,必須使用獨立且時間對齊的 F0 估計；這是 contour 診斷，不能作為中文聲調分類器或主觀音質分數。
+realtime,1693,992,0.93502658003544,10.747223241895938,0.8497409326424871,9,必須使用獨立且時間對齊的 F0 估計；這是 contour 診斷，不能作為中文聲調分類器或主觀音質分數。

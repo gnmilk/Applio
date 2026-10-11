@@ -1,0 +1,113 @@
+{
+  "status": "PASS",
+  "benchmark_report": "tools\\realtime_optimization\\runs\\20261010T084344Z-a54afaa6a23c\\report.json",
+  "tool_sha256": "3037d8eab5d1dce5270bba32f5747cc551092c17d919ad2b0047f3edce8ab777",
+  "method": "既有 RMVPE FP32，全段獨立波形估計，16k／160 hop／threshold=0.03；不是生成器 pitch cache",
+  "weights_sha256": "6d62215f4306e3ca278246188607209f09af3dc77ed4232efdd069798c4ec193",
+  "requested_device": "cuda:0",
+  "sample_grid_seconds": 0.01,
+  "declared_delays_ms": {
+    "offline": 0,
+    "realtime": 60
+  },
+  "start_seconds": 3.5,
+  "limitations": "固定延遲只是近似；SOLA offset、VAD 跳過 context 更新與 F0 估計誤差均影響比較。未人工校正每音節，不可將數據當中文聲調正確率、自然度或口音分數。",
+  "device": "cuda:0",
+  "files": {
+    "source": {
+      "path": "E:\\AiVoice\\Applio_3.6.5\\assets\\audios\\測試用原音音檔一般聊天.wav",
+      "sha256": "123ee84ba56e523653289f8ba8e80b588d4303eaef5c7f67356274aff7d46a03",
+      "sample_rate": 48000,
+      "channels": 1,
+      "samples": 983040,
+      "nonfinite_samples_before_preprocessing": 0,
+      "preprocessing": "聲道平均為 mono；非 48k 以 soxr HQ 離線重採樣；不調整音量"
+    },
+    "offline": {
+      "path": "E:\\AiVoice\\Applio_3.6.5\\tools\\realtime_optimization\\runs\\20261010T084344Z-a54afaa6a23c\\offline.wav",
+      "sha256": "0b2f4c17494d13b02942067aebfa58182849c7ddf7ba68a590ba442803c1c67e",
+      "sample_rate": 48000,
+      "channels": 1,
+      "samples": 982080,
+      "nonfinite_samples_before_preprocessing": 0,
+      "preprocessing": "聲道平均為 mono；非 48k 以 soxr HQ 離線重採樣；不調整音量"
+    },
+    "realtime": {
+      "path": "E:\\AiVoice\\Applio_3.6.5\\tools\\realtime_optimization\\runs\\20261010T084344Z-a54afaa6a23c\\realtime.wav",
+      "sha256": "8aa8b1c06ad833ed1fd4286c8435c647a7d39c1a564b3d43d9191aea01f5c470",
+      "sample_rate": 48000,
+      "channels": 1,
+      "samples": 983040,
+      "nonfinite_samples_before_preprocessing": 0,
+      "preprocessing": "聲道平均為 mono；非 48k 以 soxr HQ 離線重採樣；不調整音量"
+    }
+  },
+  "comparison": {
+    "offline": {
+      "frames": 1693,
+      "jointly_voiced_frames": 1039,
+      "voicing_agreement": 0.9669226225634967,
+      "median_abs_cents_error": 6.0054079070411035,
+      "slope_direction_agreement": 0.8582755203171457,
+      "pitch_shift_semitones": 9,
+      "limitations": "必須使用獨立且時間對齊的 F0 估計；這是 contour 診斷，不能作為中文聲調分類器或主觀音質分數。"
+    },
+    "realtime": {
+      "frames": 1693,
+      "jointly_voiced_frames": 992,
+      "voicing_agreement": 0.93502658003544,
+      "median_abs_cents_error": 10.747223241895938,
+      "slope_direction_agreement": 0.8497409326424871,
+      "pitch_shift_semitones": 9,
+      "limitations": "必須使用獨立且時間對齊的 F0 估計；這是 contour 診斷，不能作為中文聲調分類器或主觀音質分數。"
+    }
+  },
+  "delay_sensitivity": {
+    "40": {
+      "frames": 1695,
+      "jointly_voiced_frames": 959,
+      "voicing_agreement": 0.8949852507374632,
+      "median_abs_cents_error": 44.90341981612812,
+      "slope_direction_agreement": 0.6788399570354458,
+      "pitch_shift_semitones": 9,
+      "limitations": "必須使用獨立且時間對齊的 F0 估計；這是 contour 診斷，不能作為中文聲調分類器或主觀音質分數。"
+    },
+    "50": {
+      "frames": 1694,
+      "jointly_voiced_frames": 977,
+      "voicing_agreement": 0.9167650531286895,
+      "median_abs_cents_error": 27.440775583592313,
+      "slope_direction_agreement": 0.7557894736842106,
+      "pitch_shift_semitones": 9,
+      "limitations": "必須使用獨立且時間對齊的 F0 估計；這是 contour 診斷，不能作為中文聲調分類器或主觀音質分數。"
+    },
+    "60": {
+      "frames": 1693,
+      "jointly_voiced_frames": 992,
+      "voicing_agreement": 0.93502658003544,
+      "median_abs_cents_error": 10.747223241895938,
+      "slope_direction_agreement": 0.8497409326424871,
+      "pitch_shift_semitones": 9,
+      "limitations": "必須使用獨立且時間對齊的 F0 估計；這是 contour 診斷，不能作為中文聲調分類器或主觀音質分數。"
+    },
+    "70": {
+      "frames": 1692,
+      "jointly_voiced_frames": 990,
+      "voicing_agreement": 0.9332151300236406,
+      "median_abs_cents_error": 11.782323824545983,
+      "slope_direction_agreement": 0.8497409326424871,
+      "pitch_shift_semitones": 9,
+      "limitations": "必須使用獨立且時間對齊的 F0 估計；這是 contour 診斷，不能作為中文聲調分類器或主觀音質分數。"
+    },
+    "80": {
+      "frames": 1691,
+      "jointly_voiced_frames": 978,
+      "voicing_agreement": 0.9195742164399764,
+      "median_abs_cents_error": 28.07516975570684,
+      "slope_direction_agreement": 0.7605042016806722,
+      "pitch_shift_semitones": 9,
+      "limitations": "必須使用獨立且時間對齊的 F0 估計；這是 contour 診斷，不能作為中文聲調分類器或主觀音質分數。"
+    }
+  },
+  "weights_preserved": true
+}

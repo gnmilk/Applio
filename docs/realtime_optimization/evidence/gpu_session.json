@@ -1,0 +1,82 @@
+{
+  "authorization": "使用者允許恢復GPU Benchmark，先不要開實體音訊Stream。",
+  "primary_run": "20261010T084344Z-a54afaa6a23c",
+  "reproducibility_run": "20261010T084559Z-b78ee0e39ad3",
+  "trace_run": "20261010T084929Z-3aef61739195",
+  "f0_run": "20261010T090412Z-7c965d45f735",
+  "suite_run": "20261010T085641Z-08ad59ef0c50",
+  "commands": {
+    "primary": ".\\env\\python.exe -B -X utf8 tools/realtime_optimization/benchmark.py --mode run --allow-inference --config tools/realtime_optimization/preset.example.json --input \"assets/audios/測試用原音音檔一般聊天.wav\" --repeats 5 --warmup-chunks 5 --profile --offline-reference",
+    "trace": ".\\env\\python.exe -B -X utf8 tools/realtime_optimization/benchmark.py --mode run --allow-inference --input tools/realtime_optimization/runs/20261010T084307Z-7c2157b93aff/short_input.wav --repeats 1 --warmup-chunks 5 --profile --trace",
+    "f0": ".\\env\\python.exe -B -X utf8 tools/realtime_optimization/f0_evaluation.py --benchmark-report tools/realtime_optimization/runs/20261010T084344Z-a54afaa6a23c/report.json --allow-inference"
+  },
+  "gpu_snapshot_before": {
+    "memory_used_mib": 8013,
+    "utilization_percent": 47,
+    "driver_version": "591.86"
+  },
+  "gpu_snapshot_during": {
+    "memory_used_mib": 8186,
+    "utilization_percent": 91,
+    "time_local": "2026-10-10 16:44:33"
+  },
+  "gpu_snapshot_after": {
+    "memory_used_mib": 7383,
+    "utilization_percent": 69,
+    "time_local": "2026-10-10 16:53:13"
+  },
+  "normal_repeat_max_abs_diff": 0.0005559995770454407,
+  "normal_repeat_rms_diff": 1.8428450857754797e-05,
+  "bitwise_equal": false,
+  "asset_hash_preserved": {
+    "E:\\AiVoice\\Applio_3.6.5\\logs\\TaiwanFemale3_CNHubert_v3\\TaiwanFemale3_CNHubert_v3_90e_28890s.pth": true,
+    "E:\\AiVoice\\Applio_3.6.5\\logs\\TaiwanFemale3_CNHubert_v3\\TaiwanFemale3_CNHubert_v3.index": true,
+    "E:\\AiVoice\\Applio_3.6.5\\rvc\\models\\embedders\\embedders_custom\\chinese_hubert_base_custom\\config.json": true,
+    "E:\\AiVoice\\Applio_3.6.5\\rvc\\models\\embedders\\embedders_custom\\chinese_hubert_base_custom\\pytorch_model.bin": true,
+    "E:\\AiVoice\\Applio_3.6.5\\rvc\\models\\predictors\\rmvpe.pt": true
+  },
+  "existing_config_hash_preserved": {
+    "assets/config.json": true,
+    "ui_settings.json": true
+  },
+  "production_source_hash_preserved": {
+    "rvc/realtime/core.py": true,
+    "rvc/realtime/pipeline.py": true,
+    "rvc/realtime/audio.py": true,
+    "rvc/realtime/worker.py": true,
+    "rvc/realtime/callbacks.py": true,
+    "rvc/realtime/client.py": true,
+    "rvc/realtime/utils/torch.py": true,
+    "rvc/realtime/utils/vad.py": true,
+    "rvc/infer/pipeline.py": true,
+    "rvc/lib/algorithm/synthesizers.py": true,
+    "rvc/lib/predictors/f0.py": true,
+    "rvc/lib/predictors/RMVPE.py": true,
+    "rvc/lib/utils.py": true,
+    "rvc/configs/config.py": true
+  },
+  "input_hash_preserved": true,
+  "long_source_hash_preserved": true,
+  "physical_stream_opened": false,
+  "prototype": null,
+  "commits_created": [],
+  "pushed": false,
+  "current_tool_sha256": {
+    "tools\\realtime_optimization\\benchmark.py": "bc96f1f1c54f669c64a007a8e1d725ba59a262032184fd761764f8ba628a704c",
+    "tools\\realtime_optimization\\f0_evaluation.py": "3037d8eab5d1dce5270bba32f5747cc551092c17d919ad2b0047f3edce8ab777",
+    "tools\\realtime_optimization\\instrumentation.py": "ab268fa3e7f5afcbb65d9ee61daccb68c6512597240afab686dd5818eb7241f1",
+    "tools\\realtime_optimization\\metrics.py": "20664b9b0195a7da2913fb76e3bb9794bac21117c06f2c6dd782d3ec5e958074",
+    "tools\\realtime_optimization\\quality.py": "d7212b4a0b9da690482dff86b886714e144233f5fb32482a1540c2c1fc9e0e95",
+    "tools\\realtime_optimization\\__init__.py": "a1288978515c66cca0e9210283c8657633905b7f5f8cc456d1cf304baeb2afcb"
+  },
+  "limitations": "背景GPU負載未控制；快照非連續記錄。主要run工具版本早於後續RUNNING/CLI metadata及獨立F0工具修正；原始report保留當時source hash，production source均核對，未竄改report。",
+  "suite_input_hash_preserved": {
+    "assets\\audios\\測試用原音音檔(低音量、氣音、輕聲).wav": true,
+    "assets\\audios\\測試用原音音檔(快速話測試).wav": true,
+    "assets\\audios\\測試用原音音檔(疑問句).wav": true,
+    "assets\\audios\\測試用原音音檔(相似音密集測試).wav": true,
+    "assets\\audios\\測試用原音音檔(情緒快速切換).wav": true,
+    "assets\\audios\\測試用原音音檔(遊戲場景).wav": true,
+    "E:\\AiVoice\\Applio_3.6.5\\tools\\realtime_optimization\\runs\\20261010T085641Z-08ad59ef0c50\\long_input_60s.wav": true
+  }
+}

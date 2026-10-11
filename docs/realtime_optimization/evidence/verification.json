@@ -1,0 +1,70 @@
+{
+  "date": "2026-10-10",
+  "safe_checks": {
+    "command": ".\\env\\python.exe -B -X utf8 tests\\run_safe_checks.py",
+    "exit_code": 0,
+    "compiled_python_files": 124,
+    "tests_run": 65,
+    "new_tests": 27,
+    "failures": 0,
+    "status": "PASS",
+    "assets_config_preserved": true
+  },
+  "cpu_integration": {
+    "status": "PASS",
+    "description": "真正 Realtime/Pipeline 邊界處理配 CPU 小型網路；逐 sample 輸出與 SOLA buffer 比對一致，不代表真實模型／GPU 品質"
+  },
+  "f0_characterization": {
+    "status": "PASS",
+    "fine_f0_hz": [
+      50,
+      1100
+    ],
+    "offline_coarse": [
+      1,
+      255
+    ],
+    "realtime_coarse": [
+      8,
+      246
+    ],
+    "description": "測試確認既有差異；未修改推論演算法"
+  },
+  "code_review": {
+    "status": "PASS",
+    "fixed_findings": [
+      "有效 Index 路徑一致",
+      "品質載入保留非有限值",
+      "整輪 RTF 含尾端等待",
+      "工具來源納入 hash",
+      "依實際startup排除F0評估",
+      "省略升調使用runtime預設0",
+      "拒絕動態升調套用固定誤差比較"
+    ],
+    "description": "獨立只讀複核未發現新的交付阻擋；不是硬體測試"
+  },
+  "physical_audio": "NOT TESTED",
+  "gpu_inference": "PASS",
+  "same_condition_offline_realtime_audio": "PASS",
+  "prototype": null,
+  "commits_created": [],
+  "pushed": false,
+  "mandarin_asr": "NOT TESTED",
+  "independent_output_f0": "PASS",
+  "gpu_measurements": {
+    "primary_steady_chunks": 345,
+    "repeats": 5,
+    "diagnostic_events": "PASS",
+    "short_cuda_trace": "PASS",
+    "supplemental_cases": 7,
+    "long_case_seconds": 60,
+    "all_case_outputs_nonfinite_samples": 0,
+    "all_case_outputs_clipped_samples": 0,
+    "normal_vs_profile_bitwise": "NOT PROVEN",
+    "normal_repeat_bitwise": false,
+    "background_gpu_load_controlled": false
+  },
+  "resolved_execution_issues": [
+    "獨立F0首輪使用錯誤類名RMVPE造成ImportError；核對本repo實際API，改RMVPE0Predictor後加入constructor mock回歸並成功執行GPU評估。"
+  ]
+}

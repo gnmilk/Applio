@@ -1,0 +1,118 @@
+{
+  "schema_version": 1,
+  "status": "NOT TESTED",
+  "description": "固定 WAV 的純 Pipeline 模擬；無實體音效裝置。",
+  "config": {
+    "voice_changer": {
+      "block_frame": 12000,
+      "cross_fade_overlap_size": 0.05,
+      "extra_convert_size": 2.5,
+      "model_path": "logs/TaiwanFemale3_CNHubert_v3/TaiwanFemale3_CNHubert_v3_90e_28890s.pth",
+      "index_path": "logs/TaiwanFemale3_CNHubert_v3/TaiwanFemale3_CNHubert_v3.index",
+      "embedder_model": "custom",
+      "embedder_model_custom": "rvc/models/embedders/embedders_custom/chinese_hubert_base_custom",
+      "f0_method": "rmvpe",
+      "silent_threshold": -60,
+      "vad_enabled": true,
+      "vad_sensitivity": 3,
+      "vad_frame_ms": 30,
+      "sid": 0,
+      "clean_audio": false,
+      "clean_strength": 0.5,
+      "post_process": false
+    },
+    "inference": {
+      "f0_up_key": 9,
+      "index_rate": 0.75,
+      "protect": 0.5,
+      "volume_envelope": 0.63,
+      "f0_autotune": false,
+      "f0_autotune_strength": 1.0,
+      "proposed_pitch": false,
+      "proposed_pitch_threshold": 155.0,
+      "use_phase_vocoder": true
+    }
+  },
+  "config_source": "E:\\AiVoice\\Applio_3.6.5\\tools\\realtime_optimization\\preset.example.json",
+  "environment": {
+    "timestamp_utc": "2026-10-10T08:15:32.402409+00:00",
+    "root": "E:\\AiVoice\\Applio_3.6.5",
+    "python": "3.12.15 | packaged by Anaconda, Inc. | (main, Oct  1 2026, 20:14:50) [MSC v.1942 64 bit (AMD64)]",
+    "python_executable": "E:\\AiVoice\\Applio_3.6.5\\env\\python.exe",
+    "platform": "Windows-10-10.0.19045-SP0",
+    "versions": {
+      "torch": "2.11.0+cu128",
+      "torchaudio": "2.11.0+cu128",
+      "numpy": "2.4.6",
+      "soundfile": "0.14.0",
+      "psutil": "7.2.2",
+      "gradio": "6.20.0",
+      "sounddevice": "0.5.5"
+    },
+    "cuda_build": "128",
+    "cuda_runtime": null,
+    "gpu_device": null,
+    "driver_version": null,
+    "hardware_reason": "WDF_VIOLATION 後尚未恢復硬體驗證；稽核不呼叫 CUDA/PortAudio",
+    "branch": "v3.6.5/self-enhance-realtime-perfermance",
+    "head": "f3ef90be7dde36a0cdf909986cfc2d9dbe62d15b",
+    "git_status": "M .gitignore\n M tests/run_safe_checks.py\n?? AGENTS.md\n?? docs/CUSTOMIZATION.md\n?? docs/realtime_optimization/architecture.md\n?? docs/realtime_optimization/optimization_plan.md\n?? tests/test_realtime_benchmark.py\n?? tools/realtime_optimization/README.md\n?? tools/realtime_optimization/__init__.py\n?? tools/realtime_optimization/benchmark.py\n?? tools/realtime_optimization/instrumentation.py\n?? tools/realtime_optimization/metrics.py\n?? tools/realtime_optimization/preset.example.json\n?? tools/realtime_optimization/quality.py",
+    "source_sha256": {
+      "rvc/realtime/core.py": "6d5f991232e32b4e51db51178ae2f49191cd8f35043bd79eee606cbb43d11d8a",
+      "rvc/realtime/pipeline.py": "a6b8fc31a6f1c0391d589332fcb7b6de137ca17711da0910eaef5feb8b7f00ca",
+      "rvc/realtime/audio.py": "46f4a4ead6bad90f21951a74534aa0e699eacb38aff879c3b9328bfe40f8cc26",
+      "rvc/realtime/worker.py": "7ca87831456ef4d322dd2c6a71c375175fc6f0a8ff2233d66d988e8d4d25aa59",
+      "rvc/realtime/callbacks.py": "64c5f499ef81fe45384ea98260807e91a7417dbd1fe4ba6e35fa8eeb7fe483b9",
+      "rvc/realtime/client.py": "8b34db40dd0918fae665e7ec29df7d54bdcfbec185fd1ad854537ca7c427403d",
+      "rvc/realtime/utils/torch.py": "152b1c039812d6b766d6ebeceb5efc89d2f5173e62c6b866e35d7834c46d8cc0",
+      "rvc/realtime/utils/vad.py": "38a94bd800a399e975c502e14de8a700e57c7be62ecce32f3eef33fdbb851f8f",
+      "rvc/infer/pipeline.py": "70cc198733311e72d5b35a06f9cc4625625dc163a0f3be7eafd39a5cf91d8cd5",
+      "rvc/lib/algorithm/synthesizers.py": "79447e987f624aa78f12f707a97ce2ac36b25da623a7e807a4b3518009c225c9",
+      "rvc/lib/predictors/f0.py": "0f9cc3fb000e6bfd62db7d24db90b3e2464dca11e23f1bfb794e0024a5fee952",
+      "rvc/lib/predictors/RMVPE.py": "9f2886c516bdf10ce639fbf8d6c1f3fe20ef455fc2a97203ad85863d40dee30e",
+      "rvc/lib/utils.py": "a1f26141cd9539b16b21ced0843d0f25006120a2559485ecfa622507c7a4aef1",
+      "rvc/configs/config.py": "f21962c7b45d51acd3ccd45c5b98a158a478178e062af286b0e1b3d22271d499",
+      "tools/realtime_optimization/__init__.py": "a1288978515c66cca0e9210283c8657633905b7f5f8cc456d1cf304baeb2afcb",
+      "tools/realtime_optimization/benchmark.py": "ed43f16d035b39132012b760edee76e923b19fce23fbc8a90a7120e2e9770872",
+      "tools/realtime_optimization/instrumentation.py": "ab268fa3e7f5afcbb65d9ee61daccb68c6512597240afab686dd5818eb7241f1",
+      "tools/realtime_optimization/metrics.py": "20664b9b0195a7da2913fb76e3bb9794bac21117c06f2c6dd782d3ec5e958074",
+      "tools/realtime_optimization/quality.py": "d7212b4a0b9da690482dff86b886714e144233f5fb32482a1540c2c1fc9e0e95"
+    },
+    "config_sha256": {
+      "assets/config.json": "722c1083847e8b3cb51372c17715dd3fc5c6ebb5ee2c27983e765a59d73ea574",
+      "ui_settings.json": "3f33128662ec86c3b04ea89733df0836fec5526c5f85fc63576b8e5b2cb15941"
+    },
+    "prerequisites": [
+      {
+        "path": "E:\\AiVoice\\Applio_3.6.5\\logs\\TaiwanFemale3_CNHubert_v3\\TaiwanFemale3_CNHubert_v3_90e_28890s.pth",
+        "exists": true,
+        "bytes": 55238048
+      },
+      {
+        "path": "E:\\AiVoice\\Applio_3.6.5\\logs\\TaiwanFemale3_CNHubert_v3\\TaiwanFemale3_CNHubert_v3.index",
+        "exists": true,
+        "bytes": 31588619
+      },
+      {
+        "path": "E:\\AiVoice\\Applio_3.6.5\\rvc\\models\\embedders\\embedders_custom\\chinese_hubert_base_custom\\config.json",
+        "exists": true,
+        "bytes": 1380
+      },
+      {
+        "path": "E:\\AiVoice\\Applio_3.6.5\\rvc\\models\\embedders\\embedders_custom\\chinese_hubert_base_custom\\pytorch_model.bin",
+        "exists": true,
+        "bytes": 377552987
+      },
+      {
+        "path": "E:\\AiVoice\\Applio_3.6.5\\rvc\\models\\predictors\\rmvpe.pt",
+        "exists": true,
+        "bytes": 181184272
+      }
+    ]
+  },
+  "performance": null,
+  "end_to_end_latency_ms": null,
+  "prototype": null,
+  "error": "只執行安全稽核；沒有載入模型、CUDA 或 PortAudio",
+  "existing_configs_preserved": true
+}

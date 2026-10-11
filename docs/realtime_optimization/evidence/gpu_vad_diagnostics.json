@@ -1,0 +1,78 @@
+{
+  "status": "PASS",
+  "description": "同參數CPU重播torchaudio resampler與WebRTC VAD；僅診斷，不跑模型／Stream。",
+  "limitations": "CPU resampler和GPU可能有rounding差異；未從GPU pass捕捉VAD返回值，不能視為直接GPU gate telemetry。低音量活動門檻可能漏掉被抑制輕聲。",
+  "cases": {
+    "低音量、氣音、輕聲": {
+      "steady_chunks": 52,
+      "zero_output_chunks": 8,
+      "cpu_vad_rejected_chunks": 7,
+      "cpu_gate_output_mismatch_chunks": [],
+      "heuristic_flag_details": []
+    },
+    "快速話測試": {
+      "steady_chunks": 42,
+      "zero_output_chunks": 2,
+      "cpu_vad_rejected_chunks": 1,
+      "cpu_gate_output_mismatch_chunks": [],
+      "heuristic_flag_details": []
+    },
+    "疑問句": {
+      "steady_chunks": 67,
+      "zero_output_chunks": 8,
+      "cpu_vad_rejected_chunks": 8,
+      "cpu_gate_output_mismatch_chunks": [],
+      "heuristic_flag_details": []
+    },
+    "相似音密集測試": {
+      "steady_chunks": 53,
+      "zero_output_chunks": 1,
+      "cpu_vad_rejected_chunks": 1,
+      "cpu_gate_output_mismatch_chunks": [],
+      "heuristic_flag_details": []
+    },
+    "情緒快速切換": {
+      "steady_chunks": 74,
+      "zero_output_chunks": 8,
+      "cpu_vad_rejected_chunks": 8,
+      "cpu_gate_output_mismatch_chunks": [],
+      "heuristic_flag_details": [
+        {
+          "case": "情緒快速切換",
+          "chunk": 35,
+          "start_seconds": 8.75,
+          "input_rms_db": -37.29015065507559,
+          "buffer_rms_db": -38.06958247674444,
+          "cpu_vad_speech": true,
+          "predicted_reason": "speech",
+          "gpu_output_all_zero": false
+        }
+      ]
+    },
+    "遊戲場景": {
+      "steady_chunks": 57,
+      "zero_output_chunks": 4,
+      "cpu_vad_rejected_chunks": 4,
+      "cpu_gate_output_mismatch_chunks": [],
+      "heuristic_flag_details": [
+        {
+          "case": "遊戲場景",
+          "chunk": 15,
+          "start_seconds": 3.75,
+          "input_rms_db": -36.452474868685094,
+          "buffer_rms_db": -37.25930306751912,
+          "cpu_vad_speech": true,
+          "predicted_reason": "speech",
+          "gpu_output_all_zero": false
+        }
+      ]
+    },
+    "60秒長段": {
+      "steady_chunks": 227,
+      "zero_output_chunks": 24,
+      "cpu_vad_rejected_chunks": 17,
+      "cpu_gate_output_mismatch_chunks": [],
+      "heuristic_flag_details": []
+    }
+  }
+}
